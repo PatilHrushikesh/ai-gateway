@@ -212,7 +212,7 @@ func parseAndValidateFlags(args []string) (*flags, error) {
 	extProcMaxRequests := fs.Int(
 		"extProcMaxRequests",
 		int(extensionserver.DefaultExtProcMaxRequests),
-		"Circuit breaker max_requests for the ext_proc UDS cluster. Controls how many concurrent gRPC streams are allowed before Envoy returns overflow errors. Default is 10000.",
+		"Circuit breaker max_requests for the ext_proc UDS cluster. Controls how many concurrent gRPC streams are allowed before Envoy returns overflow errors. Default is 1024.",
 	)
 	watchNamespaces := fs.String(
 		"watchNamespaces",

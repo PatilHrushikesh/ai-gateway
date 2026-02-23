@@ -40,7 +40,8 @@ type Server struct {
 const serverName = "envoy-gateway-extension-server"
 
 // DefaultExtProcMaxRequests is the default circuit breaker max_requests for the ext_proc UDS cluster.
-const DefaultExtProcMaxRequests = 10000
+// Override via --extProcMaxRequests or controller.extProcMaxRequests in Helm.
+const DefaultExtProcMaxRequests = 1024
 
 // New creates a new instance of the extension server that implements the EnvoyGatewayExtensionServer interface.
 func New(k8sClient client.Client, logger logr.Logger, udsPath string, isStandAloneMode bool, requestHeaderAttributes, logRequestHeaderAttributes *string, extProcMaxRequests uint32) (*Server, error) {
