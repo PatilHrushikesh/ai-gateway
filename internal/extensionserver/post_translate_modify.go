@@ -107,6 +107,16 @@ func (s *Server) PostTranslateModify(_ context.Context, req *egextension.PostTra
 			//
 			// So, we set it to 50MBi.
 			PerConnectionBufferLimitBytes: wrapperspb.UInt32(52428800),
+			// Raise circuit breaker thresholds to support high concurrency with large payloads.
+			// The default max_requests of 1024 causes overflow when many concurrent requests
+			// open gRPC streams to the ext_proc server simultaneously.
+			CircuitBreakers: &clusterv3.CircuitBreakers{
+				Thresholds: []*clusterv3.CircuitBreakers_Thresholds{
+					{
+						MaxRequests: wrapperspb.UInt32(s.getExtProcMaxRequests()),
+					},
+				},
+			},
 			LoadAssignment: &endpointv3.ClusterLoadAssignment{
 				ClusterName: extProcUDSClusterName,
 				Endpoints: []*endpointv3.LocalityLbEndpoints{

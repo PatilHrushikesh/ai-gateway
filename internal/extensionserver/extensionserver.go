@@ -32,16 +32,25 @@ type Server struct {
 	isStandAloneMode bool
 	// logRequestHeaderAttributes maps request headers to dynamic metadata keys for access logs.
 	logRequestHeaderAttributes map[string]string
+	// extProcMaxRequests is the maximum number of concurrent requests allowed to the ext_proc
+	// UDS cluster before Envoy's circuit breaker triggers overflow. Defaults to 10000.
+	extProcMaxRequests uint32
 }
 
 const serverName = "envoy-gateway-extension-server"
 
+// DefaultExtProcMaxRequests is the default circuit breaker max_requests for the ext_proc UDS cluster.
+const DefaultExtProcMaxRequests = 10000
+
 // New creates a new instance of the extension server that implements the EnvoyGatewayExtensionServer interface.
-func New(k8sClient client.Client, logger logr.Logger, udsPath string, isStandAloneMode bool, requestHeaderAttributes, logRequestHeaderAttributes *string) (*Server, error) {
+func New(k8sClient client.Client, logger logr.Logger, udsPath string, isStandAloneMode bool, requestHeaderAttributes, logRequestHeaderAttributes *string, extProcMaxRequests uint32) (*Server, error) {
 	logger = logger.WithName(serverName)
 	logAttrs, err := requestheaderattrs.ResolveLog(requestHeaderAttributes, logRequestHeaderAttributes)
 	if err != nil {
 		return nil, err
+	}
+	if extProcMaxRequests == 0 {
+		extProcMaxRequests = DefaultExtProcMaxRequests
 	}
 	return &Server{
 		log:                        logger,
@@ -49,6 +58,7 @@ func New(k8sClient client.Client, logger logr.Logger, udsPath string, isStandAlo
 		udsPath:                    udsPath,
 		isStandAloneMode:           isStandAloneMode,
 		logRequestHeaderAttributes: logAttrs,
+		extProcMaxRequests:         extProcMaxRequests,
 	}, nil
 }
 
@@ -67,6 +77,13 @@ func (s *Server) List(context.Context, *grpc_health_v1.HealthListRequest) (*grpc
 	return &grpc_health_v1.HealthListResponse{Statuses: map[string]*grpc_health_v1.HealthCheckResponse{
 		serverName: {Status: grpc_health_v1.HealthCheckResponse_SERVING},
 	}}, nil
+}
+
+func (s *Server) getExtProcMaxRequests() uint32 {
+	if s.extProcMaxRequests == 0 {
+		return DefaultExtProcMaxRequests
+	}
+	return s.extProcMaxRequests
 }
 
 // toAny marshals the provided message to an Any message.
