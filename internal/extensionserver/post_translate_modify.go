@@ -111,7 +111,7 @@ func (s *Server) PostTranslateModify(_ context.Context, req *egextension.PostTra
 			CircuitBreakers: &clusterv3.CircuitBreakers{
 				Thresholds: []*clusterv3.CircuitBreakers_Thresholds{
 					{
-						MaxRequests: wrapperspb.UInt32(s.getExtProcMaxRequests()),
+						MaxRequests: wrapperspb.UInt32(s.extProcMaxRequests),
 					},
 				},
 			},

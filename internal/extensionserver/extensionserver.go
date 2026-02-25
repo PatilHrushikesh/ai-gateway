@@ -80,13 +80,6 @@ func (s *Server) List(context.Context, *grpc_health_v1.HealthListRequest) (*grpc
 	}}, nil
 }
 
-func (s *Server) getExtProcMaxRequests() uint32 {
-	if s.extProcMaxRequests == 0 {
-		return DefaultExtProcMaxRequests
-	}
-	return s.extProcMaxRequests
-}
-
 // toAny marshals the provided message to an Any message.
 func toAny(msg proto.Message) (*anypb.Any, error) {
 	b, err := proto.Marshal(msg)
