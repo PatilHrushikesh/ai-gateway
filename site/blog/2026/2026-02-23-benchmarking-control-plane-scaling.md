@@ -146,3 +146,14 @@ Scaling an AI Gateway isn't just about how many tokens per second you can proces
 We successfully tested Envoy AI Gateway with **2,000 AIGatewayRoutes**, and the system performed well across the board — consistent route readiness latency, linear and predictable resource growth, and zero routing failures.
 
 The only tuning required was increasing the gRPC message size from the default 4MB to 25MB to accommodate the larger xDS configuration payloads. With that configuration in place, the gateway handled 2,000 routes without any issues.
+
+## Get Involved
+
+Envoy AI Gateway is an open-source, community-driven project, and we'd love your help to continue improving it. Whether it's running your own benchmarks, contributing code, or sharing feedback, there are many ways to get involved:
+
+- **Join us on Slack** -- [Register for Envoy Slack](https://communityinviter.com/apps/envoyproxy/envoy) and join the **#envoy-ai-gateway** channel to connect with the community.
+- **Attend the Weekly Community Meeting** -- We meet every week to discuss roadmap, features, and open issues. Check the [meeting notes](https://docs.google.com/document/d/10e1sfsF-3G3Du5nBHGmLjXw5GVMqqCvFDqp_O65B0_w/edit?tab=t.0#heading=h.6nxfjwmrm5g6) for the schedule and agenda.
+- **Contribute on GitHub** -- Raise issues, suggest improvements, and submit PRs on the [GitHub repository](https://github.com/envoyproxy/ai-gateway).
+- **Share Your Experience** -- Run your own benchmarks, try the gateway in your environment, and share your results with the community in [GitHub Discussions](https://github.com/envoyproxy/ai-gateway/discussions).
+
+We're building this together -- come help us push the boundaries of what an AI Gateway can do.
