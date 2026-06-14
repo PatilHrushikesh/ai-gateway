@@ -114,11 +114,14 @@ type Metrics interface {
 	// RecordRetriedAttempt records an upstream attempt that failed and was retried or fell back to
 	// another backend. Unlike RecordRequestCompletion, this is emitted for non-terminal attempts
 	// whose response phase never ran in the upstream filter, so that per-backend reliability stays
-	// accurate. The record is tagged with error.type=gateway_retry and the attempt number.
+	// accurate. The record is tagged with error.type=gateway_retry and the attempt number, and,
+	// when known, the upstream HTTP status code (http.response.status_code).
 	//
 	// Parameters:
 	//   - attemptNumber: the ordinal of the failed attempt (1 for the first attempt, etc.).
-	RecordRetriedAttempt(ctx context.Context, attemptNumber int, requestHeaders map[string]string)
+	//   - statusCode: the upstream HTTP status code observed for the failed attempt, or 0 if the
+	//     attempt failed before any response was received (e.g. connection error / reset).
+	RecordRetriedAttempt(ctx context.Context, attemptNumber int, statusCode int, requestHeaders map[string]string)
 	// RecordTokenUsage records token usage metrics.
 	//
 	// Depending on the endpoint, some token types are not available and should be passed as OptUint32None.

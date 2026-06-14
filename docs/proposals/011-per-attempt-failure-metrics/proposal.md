@@ -179,4 +179,25 @@ No changes are required to the controller or any CRD.
 - **Dedicated fallback metric (`gen_ai.server.request.fallback`).** Rejected as duplicative once the per-attempt recording is in place; the same signal is derivable from the existing counter.
 - **Lean on `x-envoy-attempt-count`.** Rejected because the header is populated only for HTTP retries, not for priority-based fallback (which is the main EAIG use case), and even then it conveys only the count, not which backend failed.
 - **Surface per-attempt failures only as logs.** Rejected because operators need metric-shaped data for dashboards and alerting; logs alone do not satisfy the requirement.
-- **Phase 2: enrich with HTTP status code per attempt.** Deferred, not rejected. Flipping the upstream-filter `ResponseHeaderMode` from `SKIP` to `SEND` would let each attempt's upstream filter observe the upstream status before teardown, allowing a real per-attempt status/error label. This is a more invasive xDS/extproc change and is intentionally separated from the lightweight Phase 1 above.
+- **Phase 2: enrich with HTTP status code per attempt.** Implemented (see "Phase 2: per-attempt HTTP status code" below). Flipping the upstream-filter `ResponseHeaderMode` from `SKIP` to `SEND` lets each attempt's upstream filter observe the upstream status before teardown, so the per-attempt failure record carries the real `http.response.status_code`.
+
+## Phase 2: per-attempt HTTP status code
+
+Phase 1 records that an attempt failed, but tags it only with `error.type=gateway_retry` — the `gen_ai.response.model` is `unknown` and there is no HTTP status, because a retried-away attempt's response phase never runs in the upstream filter (its `ResponseHeaderMode` is `SKIP`). Phase 2 makes the failing status visible without disturbing the terminal response path.
+
+### Design
+
+1. **xDS:** the upstream-filter `ResponseHeaderMode` is flipped from `SKIP` to `SEND` (`ResponseBodyMode` stays `NONE`). Envoy now delivers each attempt's response headers — including attempts that are about to be retried/fallen-back — to that attempt's own upstream ext_proc stream before tearing it down. See [internal/extensionserver/post_translate_modify.go](internal/extensionserver/post_translate_modify.go).
+
+2. **Avoiding double processing.** The terminal response is still translated and recorded at the router filter, which delegates to the latest `upstreamFilter`. With `SEND` enabled, the terminal attempt's response headers reach extproc twice (once on the upstream stream, once via the router delegation). To avoid re-running translation, the upstream stream's response-headers phase is routed to a new lightweight `captureUpstreamResponseStatus` (see [internal/extproc/server.go](internal/extproc/server.go) and [internal/extproc/processor_impl.go](internal/extproc/processor_impl.go)) that only reads `:status` into `upstreamProcessor.attemptStatusCode` and passes the headers through untouched. Non-terminal attempts are only ever seen on the upstream stream, so they are never double-processed.
+
+3. **Recording.** The recording site is unchanged: `SetBackend` still records the previous attempt's failure when the next attempt begins (which is the only point at which the attempt is provably non-terminal). It now passes `prev.attemptStatusCode` into `RecordRetriedAttempt`, which adds `http.response.status_code` to the record when the status is known (`> 0`). Transport-level failures (connect/reset) produce no response, so the status stays `0` and the label is omitted — keeping cardinality bounded to real HTTP status codes.
+
+### Result
+
+A retried-away attempt is now recorded on `gen_ai.server.request.duration` with `error.type=gateway_retry`, `gen_ai.request.attempt_number`, and (when available) `http.response.status_code`, so operators can break per-backend failures down by status (e.g. `429` throttling vs `503` outages).
+
+### Trade-offs vs Phase 1
+
+- **Better:** real per-attempt status code; failures are attributable to a concrete cause (throttling vs unavailability vs timeout) instead of an opaque `gateway_retry`.
+- **Worse:** one extra ext_proc round trip per attempt on the response path (the upstream filter now sends response headers to extproc), and a more invasive xDS change (`ResponseHeaderMode: SEND`) whose blast radius is larger than Phase 1's pure-extproc change. The status is still absent for transport-level failures that never produce a response.

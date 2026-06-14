@@ -211,6 +211,12 @@ func testRecordRetriedAttempt(t *testing.T) {
 		attrsRetry = attribute.NewSet(append(attrs,
 			attribute.Key(genaiAttributeErrorType).String(genaiErrorTypeRetry),
 			attribute.Key(genaiAttributeAttemptNumber).Int(1),
+			attribute.Key(attributeHTTPResponseStatusCode).Int(503),
+		)...)
+		// A second attempt that failed before any response: no status-code label is attached.
+		attrsRetryNoStatus = attribute.NewSet(append(attrs,
+			attribute.Key(genaiAttributeErrorType).String(genaiErrorTypeRetry),
+			attribute.Key(genaiAttributeAttemptNumber).Int(2),
 		)...)
 	)
 
@@ -221,10 +227,15 @@ func testRecordRetriedAttempt(t *testing.T) {
 	pm.SetBackend(&filterapi.Backend{Name: "custom"})
 
 	time.Sleep(10 * time.Millisecond)
-	pm.RecordRetriedAttempt(t.Context(), 1, nil)
+	pm.RecordRetriedAttempt(t.Context(), 1, 503, nil)
 	count, sum := testotel.GetHistogramValues(t, mr, genaiMetricServerRequestDuration, attrsRetry)
 	assert.Equal(t, uint64(1), count)
 	assert.Equal(t, 10*time.Millisecond.Seconds(), sum)
+
+	// A zero status code (connect/reset failure) omits the status-code label entirely.
+	pm.RecordRetriedAttempt(t.Context(), 2, 0, nil)
+	count, _ = testotel.GetHistogramValues(t, mr, genaiMetricServerRequestDuration, attrsRetryNoStatus)
+	assert.Equal(t, uint64(1), count)
 }
 
 func TestGetTimeToFirstTokenMsAndGetInterTokenLatencyMs(t *testing.T) {

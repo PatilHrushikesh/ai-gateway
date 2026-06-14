@@ -27,6 +27,12 @@ const (
 	// to per-attempt failure records emitted when a request is retried or falls back to another
 	// backend. This is not part of the OTel GenAI semconv; it is a custom AI Gateway attribute.
 	genaiAttributeAttemptNumber = "gen_ai.request.attempt_number"
+	// attributeHTTPResponseStatusCode is the upstream HTTP status code observed for an attempt.
+	// It follows the OTel HTTP semantic conventions (http.response.status_code) and is attached to
+	// per-attempt failure records when the failing attempt actually produced a response (Phase 2).
+	// It is omitted when the attempt failed before any response was received (e.g. connect/reset),
+	// keeping cardinality bounded to the small set of real HTTP status codes.
+	attributeHTTPResponseStatusCode = "http.response.status_code"
 
 	GenAIOperationChat            GenAIOperation = "chat"
 	GenAIOperationCompletion      GenAIOperation = "completion"

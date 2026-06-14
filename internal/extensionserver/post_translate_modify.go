@@ -309,8 +309,13 @@ func (s *Server) maybeModifyCluster(ctx context.Context, cluster *clusterv3.Clus
 		// At the upstream filter, it can access the original body in its memory, so it can perform the translation
 		// as well as the authentication at the request headers. Hence, there's no need to send the request body to the extproc.
 		RequestBodyMode: extprocv3.ProcessingMode_NONE,
-		// Response will be handled at the router filter level so that we could avoid the shenanigans around the retry+the upstream filter.
-		ResponseHeaderMode: extprocv3.ProcessingMode_SKIP,
+		// The terminal response (translation + terminal metrics) is still handled at the router filter
+		// level to avoid the shenanigans around retry + the upstream filter. We send response headers
+		// here (Phase 2) only so each attempt's upstream filter can observe its own HTTP status code
+		// before Envoy retries/falls back; the upstream stream captures the status and passes the
+		// headers through untouched (see captureUpstreamResponseStatus). The response body is still
+		// not sent to the upstream filter.
+		ResponseHeaderMode: extprocv3.ProcessingMode_SEND,
 		ResponseBodyMode:   extprocv3.ProcessingMode_NONE,
 	}
 	extProcConfig.MessageTimeout = durationpb.New(10 * time.Second)

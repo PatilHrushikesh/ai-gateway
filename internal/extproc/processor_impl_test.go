@@ -504,8 +504,17 @@ func Test_chatCompletionProcessorUpstreamFilter_SetBackend_RecordsRetriedAttempt
 	require.Zero(t, mm1.retriedAttemptCount)
 	require.False(t, p1.completionRecorded)
 
+	// Simulate the first attempt's upstream filter observing a 503 response before Envoy retries
+	// (Phase 2: captured by captureUpstreamResponseStatus on the upstream stream).
+	_, err := p1.captureUpstreamResponseStatus(t.Context(), &corev3.HeaderMap{Headers: []*corev3.HeaderValue{
+		{Key: ":status", RawValue: []byte("503")},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, 503, p1.attemptStatusCode)
+
 	// Second attempt (retry): the first attempt must be recorded as a retried-away failure with the
-	// previous attempt's ordinal (1), against the first attempt's own metrics instance.
+	// previous attempt's ordinal (1) and the captured status code (503), against the first attempt's
+	// own metrics instance.
 	mm2 := &mockMetrics{}
 	p2 := &chatCompletionProcessorUpstreamFilter{requestHeaders: headers, metrics: mm2}
 	require.NoError(t, p2.SetBackend(t.Context(), openAIBackend("backend-b"), "test-route", r))
@@ -513,8 +522,38 @@ func Test_chatCompletionProcessorUpstreamFilter_SetBackend_RecordsRetriedAttempt
 	require.Equal(t, 2, r.upstreamFilterCount)
 	require.Equal(t, 1, mm1.retriedAttemptCount)
 	require.Equal(t, 1, mm1.lastRetriedAttemptNumber)
+	require.Equal(t, 503, mm1.lastRetriedStatusCode)
 	require.True(t, p1.completionRecorded)
 	require.Zero(t, mm2.retriedAttemptCount)
+}
+
+// Test_chatCompletionProcessorUpstreamFilter_captureUpstreamResponseStatus verifies that the
+// upstream filter records the per-attempt HTTP status code from the response headers and passes the
+// headers through untouched without recording any completion metric.
+func Test_chatCompletionProcessorUpstreamFilter_captureUpstreamResponseStatus(t *testing.T) {
+	mm := &mockMetrics{}
+	p := &chatCompletionProcessorUpstreamFilter{
+		requestHeaders: map[string]string{":path": "/v1/chat/completions"},
+		metrics:        mm,
+	}
+
+	resp, err := p.captureUpstreamResponseStatus(t.Context(), &corev3.HeaderMap{Headers: []*corev3.HeaderValue{
+		{Key: ":status", RawValue: []byte("429")},
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, resp.GetResponseHeaders())
+	require.Equal(t, 429, p.attemptStatusCode)
+	// Capturing the status must not by itself record a completion or a retried attempt.
+	require.False(t, p.completionRecorded)
+	require.Zero(t, mm.retriedAttemptCount)
+	require.Zero(t, mm.requestSuccessCount)
+	require.Zero(t, mm.requestErrorCount)
+
+	// A missing / non-numeric status leaves the captured value unchanged (0 -> "unknown" later).
+	p2 := &chatCompletionProcessorUpstreamFilter{requestHeaders: map[string]string{}, metrics: &mockMetrics{}}
+	_, err = p2.captureUpstreamResponseStatus(t.Context(), &corev3.HeaderMap{})
+	require.NoError(t, err)
+	require.Zero(t, p2.attemptStatusCode)
 }
 
 // Test_chatCompletionProcessorUpstreamFilter_SetBackend_RetryGuard verifies that if the previous

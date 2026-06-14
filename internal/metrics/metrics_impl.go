@@ -145,17 +145,24 @@ func (b *metricsImpl) RecordRequestCompletion(ctx context.Context, success bool,
 }
 
 // RecordRetriedAttempt implements [Metrics.RecordRetriedAttempt].
-func (b *metricsImpl) RecordRetriedAttempt(ctx context.Context, attemptNumber int, requestHeaders map[string]string) {
+func (b *metricsImpl) RecordRetriedAttempt(ctx context.Context, attemptNumber int, statusCode int, requestHeaders map[string]string) {
 	attrs := b.buildBaseAttributes(requestHeaders)
 	// Record on the same request-duration histogram so per-backend error rate is accurate, but tag
 	// it distinctly so the partial latency of a retried-away attempt can be excluded from end-user
 	// latency percentiles. The duration is the time this attempt was alive before being abandoned.
+	extra := []attribute.KeyValue{
+		attribute.Key(genaiAttributeErrorType).String(genaiErrorTypeRetry),
+		attribute.Key(genaiAttributeAttemptNumber).Int(attemptNumber),
+	}
+	// Phase 2: when the failing attempt produced a response, attach the upstream HTTP status code so
+	// operators can break per-backend failures down by status (e.g. 429 vs 503). A zero status means
+	// the attempt failed before any response (connect/reset); we omit the label in that case.
+	if statusCode > 0 {
+		extra = append(extra, attribute.Key(attributeHTTPResponseStatusCode).Int(statusCode))
+	}
 	b.metrics.requestLatency.Record(ctx, time.Since(b.requestStart).Seconds(),
 		metric.WithAttributeSet(attrs),
-		metric.WithAttributes(
-			attribute.Key(genaiAttributeErrorType).String(genaiErrorTypeRetry),
-			attribute.Key(genaiAttributeAttemptNumber).Int(attemptNumber),
-		),
+		metric.WithAttributes(extra...),
 	)
 }
 

@@ -365,7 +365,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -427,7 +427,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -488,7 +488,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -561,7 +561,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -622,7 +622,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -683,7 +683,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -756,7 +756,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -835,7 +835,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -902,7 +902,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -964,7 +964,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1026,7 +1026,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1087,7 +1087,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1165,7 +1165,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1231,7 +1231,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1310,7 +1310,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1377,7 +1377,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1444,7 +1444,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1511,7 +1511,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:
@@ -1578,7 +1578,7 @@ static_resources:
                 processing_mode:
                   request_header_mode: "SEND"
                   request_body_mode: "NONE"
-                  response_header_mode: "SKIP"
+                  response_header_mode: "SEND"
                   response_body_mode: "NONE"
                 grpc_service:
                   envoy_grpc:

@@ -36,6 +36,14 @@ var (
 	sensitiveHeaderKeys          = []string{"authorization", "x-api-key"}
 )
 
+// upstreamResponseStatusCapturer is implemented by the upstream filter processor to capture the
+// per-attempt HTTP status code during the response-headers phase (Phase 2). It is intentionally
+// separate from [Processor.ProcessResponseHeaders] so the upstream stream does not re-run the full
+// response translation that the router filter already performs for the terminal attempt.
+type upstreamResponseStatusCapturer interface {
+	captureUpstreamResponseStatus(context.Context, *corev3.HeaderMap) (*extprocv3.ProcessingResponse, error)
+}
+
 // contextKey is a type for context keys to avoid collisions.
 type contextKey string
 
@@ -324,6 +332,20 @@ func (s *Server) processMsg(ctx context.Context, p Processor, req *extprocv3.Pro
 		responseHdrs := req.GetResponseHeaders().Headers
 		if s.debugLogEnabled {
 			l.Debug("response headers processing", slog.Any("response_headers", responseHdrs))
+		}
+		// Phase 2: at the upstream filter (ResponseHeaderMode: SEND) we only capture the per-attempt
+		// HTTP status code. The actual response translation and terminal metrics are handled on the
+		// router filter stream, which delegates to the latest upstream filter. Routing the upstream
+		// stream through the full ProcessResponseHeaders here would double-process the terminal
+		// attempt's response, so we use the lightweight status capture instead.
+		if isUpstreamFilter {
+			if c, ok := p.(upstreamResponseStatusCapturer); ok {
+				resp, err := c.captureUpstreamResponseStatus(ctx, responseHdrs)
+				if err != nil {
+					return nil, fmt.Errorf("cannot capture upstream response status: %w", err)
+				}
+				return resp, nil
+			}
 		}
 		resp, err := p.ProcessResponseHeaders(ctx, responseHdrs)
 		if err != nil {

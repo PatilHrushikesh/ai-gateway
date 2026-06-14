@@ -192,6 +192,8 @@ type mockMetrics struct {
 	retriedAttemptCount int
 	// lastRetriedAttemptNumber holds the attemptNumber from the most recent RecordRetriedAttempt call.
 	lastRetriedAttemptNumber int
+	// lastRetriedStatusCode holds the statusCode from the most recent RecordRetriedAttempt call.
+	lastRetriedStatusCode int
 }
 
 // StartRequest implements [metrics.Metrics].
@@ -269,9 +271,10 @@ func (m *mockMetrics) RecordRequestCompletion(_ context.Context, success bool, _
 }
 
 // RecordRetriedAttempt implements [metrics.Metrics].
-func (m *mockMetrics) RecordRetriedAttempt(_ context.Context, attemptNumber int, _ map[string]string) {
+func (m *mockMetrics) RecordRetriedAttempt(_ context.Context, attemptNumber int, statusCode int, _ map[string]string) {
 	m.retriedAttemptCount++
 	m.lastRetriedAttemptNumber = attemptNumber
+	m.lastRetriedStatusCode = statusCode
 }
 
 // RequireSelectedModel asserts the models set on the metrics.

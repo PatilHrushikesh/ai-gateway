@@ -131,6 +131,11 @@ type (
 		// recorded as a retried-away failure. It guards against double-counting an attempt that both
 		// recorded a completion (e.g. a local error in the request phase) and is then retried.
 		completionRecorded bool
+		// attemptStatusCode is the upstream HTTP status code observed for this attempt, captured by
+		// the upstream filter's response-headers phase (ResponseHeaderMode: SEND). It is 0 when the
+		// attempt failed before any response was received. For a retried-away attempt it is read in
+		// the next SetBackend so the per-attempt failure metric can be tagged with the real status.
+		attemptStatusCode int
 	}
 )
 
@@ -454,6 +459,29 @@ func (u *upstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT]) ProcessReque
 	panic("BUG: ProcessRequestBody should not be called in the upstream filter")
 }
 
+// captureUpstreamResponseStatus records the upstream HTTP status code for THIS attempt.
+//
+// Phase 2: the upstream filter's ResponseHeaderMode is SEND, so Envoy delivers the response headers
+// of every attempt (including the ones that are about to be retried away) to this attempt's own
+// upstream stream before tearing it down. This is the only place a non-terminal attempt's status is
+// observable, since the terminal response (translation + terminal metrics) is handled at the router
+// filter. We deliberately do NOT translate or record here: translation belongs to the router path
+// (which also runs for the terminal attempt, so doing it here too would double-process), and the
+// per-attempt failure is recorded later in SetBackend where we know the attempt was non-terminal.
+func (u *upstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT]) captureUpstreamResponseStatus(_ context.Context, headers *corev3.HeaderMap) (*extprocv3.ProcessingResponse, error) {
+	if headers != nil {
+		if code, err := strconv.Atoi(headersToMap(headers)[":status"]); err == nil {
+			u.attemptStatusCode = code
+		}
+	}
+	// Pass through untouched; the router filter owns the response transformation.
+	return &extprocv3.ProcessingResponse{
+		Response: &extprocv3.ProcessingResponse_ResponseHeaders{
+			ResponseHeaders: &extprocv3.HeadersResponse{Response: &extprocv3.CommonResponse{}},
+		},
+	}, nil
+}
+
 // ProcessResponseHeaders implements [Processor.ProcessResponseHeaders].
 func (u *upstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT]) ProcessResponseHeaders(ctx context.Context, headers *corev3.HeaderMap) (res *extprocv3.ProcessingResponse, err error) {
 	defer func() {
@@ -642,7 +670,10 @@ func (u *upstreamProcessor[ReqT, RespT, RespChunkT, EndpointSpecT]) SetBackend(c
 	// ordinal at this point (it is incremented below).
 	if prev := rp.upstreamFilter; prev != nil && !prev.completionRecorded {
 		prev.completionRecorded = true
-		prev.metrics.RecordRetriedAttempt(ctx, rp.upstreamFilterCount, prev.requestHeaders)
+		// prev.attemptStatusCode is populated by captureUpstreamResponseStatus when the failing
+		// attempt produced a response (Phase 2). It is 0 for connect/reset failures, in which case
+		// the metric omits the status-code label.
+		prev.metrics.RecordRetriedAttempt(ctx, rp.upstreamFilterCount, prev.attemptStatusCode, prev.requestHeaders)
 	}
 	rp.upstreamFilterCount++
 	u.metrics.SetBackend(backend.Backend)
