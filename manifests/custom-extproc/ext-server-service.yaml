@@ -1,0 +1,19 @@
+# ClusterIP Service for the custom extension server — Envoy Gateway connects
+# to it as the second extension manager.
+apiVersion: v1
+kind: Service
+metadata:
+  name: custom-ext-server
+  namespace: envoy-ai-gateway-system
+  labels:
+    app: custom-ext-server
+spec:
+  type: ClusterIP
+  selector:
+    app: custom-ext-server
+  ports:
+    - name: grpc
+      port: 1063
+      targetPort: 1063
+      protocol: TCP
+      appProtocol: h2c

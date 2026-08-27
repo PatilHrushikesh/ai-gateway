@@ -1,0 +1,49 @@
+# Custom extension server Deployment — control-plane EG extension that injects
+# the Composite filter + STRICT_DNS cluster into xDS after AI Gateway runs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-ext-server
+  namespace: envoy-ai-gateway-system
+  labels:
+    app: custom-ext-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: custom-ext-server
+  template:
+    metadata:
+      labels:
+        app: custom-ext-server
+    spec:
+      containers:
+        - name: custom-ext-server
+          image: quay.io/hrushikesh_patil_nutanix/custom-ext-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 1063
+              name: grpc
+              protocol: TCP
+          env:
+            - name: LISTEN_ADDR
+              value: ":1063"
+            - name: EXTPROC_SERVICE_FQDN
+              value: "custom-extproc.envoy-ai-gateway-system.svc.cluster.local"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            grpc:
+              port: 1063
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc:
+              port: 1063
+            initialDelaySeconds: 3
+            periodSeconds: 5

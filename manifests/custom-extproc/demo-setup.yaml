@@ -1,0 +1,180 @@
+# Clean AI Gateway demo on kind — mirrors k1 architecture (Gateway + AIGatewayRoute
+# + Backend) without NAI naming. Uses ai-gateway-testupstream as the OpenAI mock.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: demo-gatewayclass
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: demo-envoyproxy
+  namespace: demo
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        replicas: 1
+        container:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      envoyService:
+        type: NodePort
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: demo-gateway
+  namespace: demo
+spec:
+  gatewayClassName: demo-gatewayclass
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: demo-envoyproxy
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: demo-buffer-limit
+  namespace: demo
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: demo-gateway
+  connection:
+    bufferLimit: 50Mi
+---
+# Mock OpenAI upstream
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-testupstream
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-testupstream
+  template:
+    metadata:
+      labels:
+        app: demo-testupstream
+    spec:
+      containers:
+        - name: testupstream
+          image: docker.io/envoyproxy/ai-gateway-testupstream:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TESTUPSTREAM_ID
+              value: demo
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-testupstream
+  namespace: demo
+spec:
+  selector:
+    app: demo-testupstream
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: demo-backend
+  namespace: demo
+spec:
+  endpoints:
+    - fqdn:
+        hostname: demo-testupstream.demo.svc.cluster.local
+        port: 80
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: demo-aiservicebackend
+  namespace: demo
+spec:
+  schema:
+    name: OpenAI
+  backendRef:
+    name: demo-backend
+    kind: Backend
+    group: gateway.envoyproxy.io
+---
+# Route covering models the semantic router may emit (and clients may send directly).
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIGatewayRoute
+metadata:
+  name: demo-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: gpt-4o
+      backendRefs:
+        - name: demo-aiservicebackend
+          weight: 100
+      timeouts:
+        request: 60s
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: gpt-4o-mini
+      backendRefs:
+        - name: demo-aiservicebackend
+          weight: 100
+      timeouts:
+        request: 60s
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: auto
+      backendRefs:
+        - name: demo-aiservicebackend
+          weight: 100
+      timeouts:
+        request: 60s
