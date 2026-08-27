@@ -1,0 +1,19 @@
+# ClusterIP Service for the custom ext_proc — Envoy reaches it via STRICT_DNS
+# at custom-extproc.envoy-ai-gateway-system.svc.cluster.local:9000.
+apiVersion: v1
+kind: Service
+metadata:
+  name: custom-extproc
+  namespace: envoy-ai-gateway-system
+  labels:
+    app: custom-extproc
+spec:
+  type: ClusterIP
+  selector:
+    app: custom-extproc
+  ports:
+    - name: grpc
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+      appProtocol: h2c

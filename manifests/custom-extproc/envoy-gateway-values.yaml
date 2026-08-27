@@ -1,0 +1,68 @@
+# Envoy Gateway helm values that replaces the singular extensionManager with
+# extensionManagers (plural) to chain AI Gateway and the custom extension server.
+#
+# extensionManager and extensionManagers are mutually exclusive — this file
+# REPLACES the stock manifests/envoy-gateway-values.yaml.
+#
+# Usage:
+#   helm upgrade -i eg oci://docker.io/envoyproxy/gateway-helm \
+#     --version v0.0.0-latest \
+#     --namespace envoy-gateway-system \
+#     --create-namespace \
+#     -f manifests/custom-extproc/envoy-gateway-values.yaml
+#
+# Requires Envoy Gateway v1.8.1+ (AI Gateway already depends on this).
+
+config:
+  envoyGateway:
+    gateway:
+      controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    logging:
+      level:
+        default: info
+    provider:
+      type: Kubernetes
+    extensionApis:
+      enableEnvoyPatchPolicy: true
+      enableBackend: true
+    # AI Gateway first, custom extension server second. Order matters:
+    # your server sees the xDS that AI Gateway already modified.
+    extensionManagers:
+      - name: ai-gateway
+        failOpen: false
+        hooks:
+          xdsTranslator:
+            translation:
+              listener:
+                includeAll: true
+              route:
+                includeAll: true
+              cluster:
+                includeAll: true
+              secret:
+                includeAll: true
+            post:
+              - Translation
+              - Cluster
+              - Route
+        service:
+          fqdn:
+            hostname: ai-gateway-controller.envoy-ai-gateway-system.svc.cluster.local
+            port: 1063
+      - name: custom-extproc
+        failOpen: false
+        hooks:
+          xdsTranslator:
+            translation:
+              listener:
+                includeAll: true
+              route:
+                includeAll: true
+              cluster:
+                includeAll: true
+            post:
+              - Translation
+        service:
+          fqdn:
+            hostname: custom-ext-server.envoy-ai-gateway-system.svc.cluster.local
+            port: 1063

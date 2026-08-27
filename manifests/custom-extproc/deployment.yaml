@@ -1,0 +1,47 @@
+# Custom ext_proc Deployment — data-plane processor for semantic routing and guardrails.
+# Runs as a dedicated pod (not a sidecar), reachable via the Service on gRPC :9000.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-extproc
+  namespace: envoy-ai-gateway-system
+  labels:
+    app: custom-extproc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: custom-extproc
+  template:
+    metadata:
+      labels:
+        app: custom-extproc
+    spec:
+      containers:
+        - name: custom-extproc
+          image: quay.io/hrushikesh_patil_nutanix/custom-extproc:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9000
+              name: grpc
+              protocol: TCP
+          env:
+            - name: LISTEN_ADDR
+              value: ":9000"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            grpc:
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc:
+              port: 9000
+            initialDelaySeconds: 3
+            periodSeconds: 5
