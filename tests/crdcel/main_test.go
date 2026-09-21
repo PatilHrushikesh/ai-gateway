@@ -310,6 +310,11 @@ func TestMCPRoutes(t *testing.T) {
 			name:   "backend_api_key_both_header_and_query.yaml",
 			expErr: "only one of header or queryParam can be set",
 		},
+		{name: "backend_api_key_injection_if_not_present.yaml"},
+		{
+			name:   "backend_api_key_injection_if_not_present_query.yaml",
+			expErr: "injectionPolicy cannot be IfNotPresent when queryParam is set",
+		},
 		{
 			name:   "jwks_missing.yaml",
 			expErr: "spec.securityPolicy.oauth.jwks: Invalid value: \"object\": either remoteJWKS or localJWKS must be specified.",
@@ -331,6 +336,15 @@ func TestMCPRoutes(t *testing.T) {
 			expErr: "spec.securityPolicy.authorization.rules[0].source.jwt: Invalid value: \"object\": either scopes or claims must be specified",
 		},
 		{name: "authorization_without_jwt_source.yaml"},
+		{name: "mergetype_valid.yaml"},
+		{
+			name:   "mergetype_security_policy_replace_invalid.yaml",
+			expErr: "spec.securityPolicy.mergeType: Invalid value: \"string\": Replace is not a valid MergeType for SecurityPolicy",
+		},
+		{
+			name:   "mergetype_backend_traffic_policy_replace_invalid.yaml",
+			expErr: "spec.backendTrafficPolicy.mergeType: Invalid value: \"string\": Replace is not a valid MergeType for BackendTrafficPolicy",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data, err := testdata.ReadFile(path.Join("testdata/mcpgatewayroutes", tc.name))
