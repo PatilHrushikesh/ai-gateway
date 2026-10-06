@@ -7,13 +7,16 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	rlsconfv3 "github.com/envoyproxy/go-control-plane/ratelimit/config/ratelimit/v3"
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,11 +32,12 @@ import (
 
 // QuotaPolicyController implements [reconcile.TypedReconciler] for [aigv1a1.QuotaPolicy].
 type QuotaPolicyController struct {
-	client             client.Client
-	kube               kubernetes.Interface
-	logger             logr.Logger
-	rateLimitRunner    *runner.Runner
-	aiGatewayRouteChan chan event.GenericEvent
+	client                  client.Client
+	kube                    kubernetes.Interface
+	logger                  logr.Logger
+	rateLimitRunner         *runner.Runner
+	aiGatewayRouteChan      chan event.GenericEvent
+	referenceGrantValidator *referenceGrantValidator
 	// configCache stores rate limit configs per QuotaPolicy namespace/name.
 	// This allows incremental updates when only one policy changes.
 	configCache       map[string][]*rlsconfv3.RateLimitConfig
@@ -50,13 +54,14 @@ func NewQuotaPolicyController(
 	aiGatewayRouteChan chan event.GenericEvent,
 ) *QuotaPolicyController {
 	return &QuotaPolicyController{
-		client:             client,
-		kube:               kube,
-		logger:             logger,
-		rateLimitRunner:    rateLimitRunner,
-		aiGatewayRouteChan: aiGatewayRouteChan,
-		configCache:        make(map[string][]*rlsconfv3.RateLimitConfig),
-		policyBackendKeys:  make(map[string][]string),
+		client:                  client,
+		kube:                    kube,
+		logger:                  logger,
+		rateLimitRunner:         rateLimitRunner,
+		aiGatewayRouteChan:      aiGatewayRouteChan,
+		referenceGrantValidator: newReferenceGrantValidator(client),
+		configCache:             make(map[string][]*rlsconfv3.RateLimitConfig),
+		policyBackendKeys:       make(map[string][]string),
 	}
 }
 
@@ -65,8 +70,6 @@ func (c *QuotaPolicyController) Reconcile(ctx context.Context, req reconcile.Req
 	var quotaPolicy aigv1a1.QuotaPolicy
 	if err := c.client.Get(ctx, req.NamespacedName, &quotaPolicy); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			c.logger.Info("Deleting QuotaPolicy",
-				"namespace", req.Namespace, "name", req.Name)
 			if err = c.deleteQuotaPolicyConfig(ctx, req.NamespacedName); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -75,8 +78,6 @@ func (c *QuotaPolicyController) Reconcile(ctx context.Context, req reconcile.Req
 		}
 		return ctrl.Result{}, err
 	}
-	c.logger.Info("Reconciling QuotaPolicy", "namespace", req.Namespace, "name", req.Name)
-
 	if handleFinalizer(ctx, c.client, c.logger, &quotaPolicy, func(ctx context.Context, policy *aigv1a1.QuotaPolicy) error {
 		c.notifyAIGatewayRoutes(ctx, policy)
 		return c.deleteQuotaPolicyConfig(ctx, req.NamespacedName)
@@ -84,14 +85,49 @@ func (c *QuotaPolicyController) Reconcile(ctx context.Context, req reconcile.Req
 		return ctrl.Result{}, nil
 	}
 
+	cacheKey := fmt.Sprintf("%s/%s", quotaPolicy.Namespace, quotaPolicy.Name)
+	c.mu.RLock()
+	previousTargetKeys := append([]string(nil), c.policyBackendKeys[cacheKey]...)
+	c.mu.RUnlock()
+	needsRouteRecovery := len(previousTargetKeys) == 0 && quotaPolicyWasAccepted(&quotaPolicy)
+
 	if err := c.syncQuotaPolicy(ctx, &quotaPolicy); err != nil {
-		c.logger.Error(err, "failed to sync QuotaPolicy")
-		c.updateQuotaPolicyStatus(ctx, &quotaPolicy, aigv1a1.ConditionTypeNotAccepted, err.Error())
+		reason := "ReconciliationFailed"
+		if strings.Contains(err.Error(), "not permitted") {
+			reason = aigv1a1.ConditionReasonRefNotPermitted
+		}
+		c.updateQuotaPolicyStatus(ctx, &quotaPolicy, aigv1a1.ConditionTypeNotAccepted, reason, err.Error())
+		c.notifyAIGatewayRoutes(ctx, &quotaPolicy)
+		c.notifyQuotaPolicyRoutesForKeys(ctx, previousTargetKeys)
+		if needsRouteRecovery {
+			c.notifyAllAIGatewayRoutes(ctx)
+		}
 		return ctrl.Result{}, err
 	}
-	c.updateQuotaPolicyStatus(ctx, &quotaPolicy, aigv1a1.ConditionTypeAccepted, "QuotaPolicy reconciled successfully")
+	c.updateQuotaPolicyStatus(ctx, &quotaPolicy, aigv1a1.ConditionTypeAccepted, "ReconciliationSucceeded", "QuotaPolicy reconciled successfully")
 	c.notifyAIGatewayRoutes(ctx, &quotaPolicy)
+	c.notifyQuotaPolicyRoutesForKeys(ctx, previousTargetKeys)
+	if needsRouteRecovery {
+		c.notifyAllAIGatewayRoutes(ctx)
+	}
 	return ctrl.Result{}, nil
+}
+
+func conditionStatus(conditionType string) metav1.ConditionStatus {
+	if conditionType == aigv1a1.ConditionTypeAccepted {
+		return metav1.ConditionTrue
+	}
+	return metav1.ConditionFalse
+}
+
+func quotaPolicyWasAccepted(policy *aigv1a1.QuotaPolicy) bool {
+	for _, condition := range policy.Status.Conditions {
+		if condition.Type == aigv1a1.ConditionTypeAccepted &&
+			condition.Status == metav1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // syncQuotaPolicy is the main reconciliation logic. It builds rate limit configs
@@ -100,27 +136,42 @@ func (c *QuotaPolicyController) Reconcile(ctx context.Context, req reconcile.Req
 func (c *QuotaPolicyController) syncQuotaPolicy(ctx context.Context, policy *aigv1a1.QuotaPolicy) error {
 	// Resolve target backends for this policy.
 	var backends []*aigv1b1.AIServiceBackend
+	var targetErrors []error
 	for _, ref := range policy.Spec.TargetRefs {
+		targetNamespace := ref.GetNamespace(policy.Namespace)
+		if (ref.Group != "" && ref.Group != aiServiceBackendGroup) ||
+			(ref.Kind != "" && ref.Kind != aiServiceBackendKind) {
+			targetErrors = append(targetErrors, fmt.Errorf(
+				"QuotaPolicy target %s/%s has unsupported group/kind %q/%q",
+				targetNamespace, ref.Name, ref.Group, ref.Kind))
+			continue
+		}
+		if err := c.referenceGrantValidator.validateQuotaPolicyAIServiceBackendReference(
+			ctx, policy.Namespace, targetNamespace, ref.Name); err != nil {
+			// Validate authorization before reading the remote backend. This
+			// avoids exposing whether an unauthorized target exists.
+			targetErrors = append(targetErrors, fmt.Errorf(
+				"QuotaPolicy target %s/%s is not permitted: %w",
+				targetNamespace, ref.Name, err))
+			continue
+		}
 		var backend aigv1b1.AIServiceBackend
 		key := client.ObjectKey{
-			Namespace: ref.GetNamespace(policy.Namespace),
+			Namespace: targetNamespace,
 			Name:      string(ref.Name),
 		}
 		if err := c.client.Get(ctx, key, &backend); err != nil {
 			if apierrors.IsNotFound(err) {
-				c.logger.Info("AIServiceBackend not found, skipping",
-					"namespace", key.Namespace, "name", key.Name,
-					"quotaPolicy", policy.Name)
 				continue
 			}
 			return fmt.Errorf("failed to get AIServiceBackend %s: %w", key, err)
 		}
 		backends = append(backends, &backend)
 	}
-
 	if len(backends) == 0 && len(policy.Spec.TargetRefs) > 0 {
-		return fmt.Errorf("none of the %d target AIServiceBackends were found for QuotaPolicy %s/%s, will retry",
-			len(policy.Spec.TargetRefs), policy.Namespace, policy.Name)
+		targetErrors = append(targetErrors, fmt.Errorf(
+			"none of the %d authorized target AIServiceBackends were found for QuotaPolicy %s/%s",
+			len(policy.Spec.TargetRefs), policy.Namespace, policy.Name))
 	}
 
 	// Build rate limit configs for this policy.
@@ -133,23 +184,28 @@ func (c *QuotaPolicyController) syncQuotaPolicy(ctx context.Context, policy *aig
 				policy.Namespace, policy.Name, err)
 		}
 	}
-
 	// Update cache and push merged configs to xDS.
 	// Hold the lock across both cache update and UpdateConfigs to prevent
 	// out-of-order execution where a later reconcile's UpdateConfigs could
 	// be overwritten by an earlier one completing after it.
 	cacheKey := fmt.Sprintf("%s/%s", policy.Namespace, policy.Name)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.configCache[cacheKey] = configs
 	targetKeys := make([]string, 0, len(policy.Spec.TargetRefs))
 	for _, ref := range policy.Spec.TargetRefs {
 		targetKeys = append(targetKeys, fmt.Sprintf("%s.%s", ref.Name, ref.GetNamespace(policy.Namespace)))
 	}
 	c.policyBackendKeys[cacheKey] = targetKeys
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.configCache[cacheKey] = configs
 	allConfigs := c.getMergedConfigsLocked()
 
-	return c.rateLimitRunner.UpdateConfigs(ctx, allConfigs)
+	if err := c.rateLimitRunner.UpdateConfigs(ctx, allConfigs); err != nil {
+		return err
+	}
+	if len(targetErrors) > 0 {
+		return errors.Join(targetErrors...)
+	}
+	return nil
 }
 
 // deleteQuotaPolicyConfig removes a QuotaPolicy's configs from the cache
@@ -161,7 +217,10 @@ func (c *QuotaPolicyController) deleteQuotaPolicyConfig(ctx context.Context, key
 	delete(c.configCache, cacheKey)
 	allConfigs := c.getMergedConfigsLocked()
 
-	return c.rateLimitRunner.UpdateConfigs(ctx, allConfigs)
+	if err := c.rateLimitRunner.UpdateConfigs(ctx, allConfigs); err != nil {
+		return err
+	}
+	return nil
 }
 
 // notifyQuotaPolicyRoutesOnDeletion uses the last successfully reconciled
@@ -171,6 +230,16 @@ func (c *QuotaPolicyController) notifyQuotaPolicyRoutesOnDeletion(ctx context.Co
 	c.mu.RLock()
 	targetKeys := append([]string(nil), c.policyBackendKeys[cacheKey]...)
 	c.mu.RUnlock()
+	c.notifyQuotaPolicyRoutesForKeys(ctx, targetKeys)
+	if len(targetKeys) == 0 {
+		c.notifyAllAIGatewayRoutes(ctx)
+	}
+	c.mu.Lock()
+	delete(c.policyBackendKeys, cacheKey)
+	c.mu.Unlock()
+}
+
+func (c *QuotaPolicyController) notifyQuotaPolicyRoutesForKeys(ctx context.Context, targetKeys []string) {
 	for _, backendKey := range targetKeys {
 		var routes aigv1b1.AIGatewayRouteList
 		if err := c.client.List(ctx, &routes,
@@ -182,9 +251,21 @@ func (c *QuotaPolicyController) notifyQuotaPolicyRoutesOnDeletion(ctx context.Co
 			c.aiGatewayRouteChan <- event.GenericEvent{Object: &routes.Items[i]}
 		}
 	}
-	c.mu.Lock()
-	delete(c.policyBackendKeys, cacheKey)
-	c.mu.Unlock()
+}
+
+// notifyAllAIGatewayRoutes is a conservative recovery path for a policy
+// deletion whose prior target set was not retained in memory, such as after a
+// controller restart. It prevents a stale generated route from retaining
+// policy-derived configuration.
+func (c *QuotaPolicyController) notifyAllAIGatewayRoutes(ctx context.Context) {
+	var routes aigv1b1.AIGatewayRouteList
+	if err := c.client.List(ctx, &routes); err != nil {
+		c.logger.Error(err, "failed to list AIGatewayRoutes for QuotaPolicy deletion recovery")
+		return
+	}
+	for i := range routes.Items {
+		c.aiGatewayRouteChan <- event.GenericEvent{Object: &routes.Items[i]}
+	}
 }
 
 // getMergedConfigsLocked merges all cached configs into a single RateLimitConfig.
@@ -254,9 +335,6 @@ func (c *QuotaPolicyController) notifyAIGatewayRoutes(ctx context.Context, polic
 		}
 		for i := range aiGatewayRoutes.Items {
 			route := &aiGatewayRoutes.Items[i]
-			c.logger.Info("notifying AIGatewayRoute of QuotaPolicy change",
-				"route", route.Name, "namespace", route.Namespace,
-				"quotaPolicy", policy.Name)
 			c.aiGatewayRouteChan <- event.GenericEvent{Object: route}
 		}
 	}
@@ -273,14 +351,12 @@ func (c *QuotaPolicyController) notifyAllAIGatewayRoutesInNamespace(ctx context.
 	}
 	for i := range aiGatewayRoutes.Items {
 		route := &aiGatewayRoutes.Items[i]
-		c.logger.Info("notifying AIGatewayRoute of QuotaPolicy deletion",
-			"route", route.Name, "namespace", route.Namespace)
 		c.aiGatewayRouteChan <- event.GenericEvent{Object: route}
 	}
 }
 
 // updateQuotaPolicyStatus updates the status of the QuotaPolicy.
-func (c *QuotaPolicyController) updateQuotaPolicyStatus(ctx context.Context, policy *aigv1a1.QuotaPolicy, conditionType string, message string) {
+func (c *QuotaPolicyController) updateQuotaPolicyStatus(ctx context.Context, policy *aigv1a1.QuotaPolicy, conditionType, reason, message string) {
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		if err := c.client.Get(ctx, client.ObjectKey{Name: policy.Name, Namespace: policy.Namespace}, policy); err != nil {
 			if apierrors.IsNotFound(err) {
@@ -288,7 +364,13 @@ func (c *QuotaPolicyController) updateQuotaPolicyStatus(ctx context.Context, pol
 			}
 			return err
 		}
-		policy.Status.Conditions = newConditions(conditionType, message)
+		policy.Status.Conditions = []metav1.Condition{{
+			Type:               conditionType,
+			Status:             conditionStatus(conditionType),
+			Reason:             reason,
+			Message:            message,
+			LastTransitionTime: metav1.Now(),
+		}}
 		return c.client.Status().Update(ctx, policy)
 	})
 	if err != nil {

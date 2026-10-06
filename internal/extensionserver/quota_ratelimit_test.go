@@ -1351,7 +1351,7 @@ func TestEnableQuotaRateLimitOnRoute_MultiplePerModelQuotas(t *testing.T) {
 
 	t.Run("filters by backend override, only matching model included", func(t *testing.T) {
 		modelInfo := &routeModelInfo{
-			backendModels: map[string][]string{"bedrock-backend": {"claude-sonnet-4-6"}},
+			backendModels: map[string][]string{"gateway/bedrock-backend": {"claude-sonnet-4-6"}},
 		}
 		require.NoError(t, enableQuotaRateLimitOnRoute(logr.Discard(), route, policies, modelInfo))
 
@@ -1413,8 +1413,8 @@ func TestEnableQuotaRateLimitOnRoute_MultiplePerModelQuotas(t *testing.T) {
 		}
 		modelInfo := &routeModelInfo{
 			backendModels: map[string][]string{
-				"bedrock-backend":       {"claude-sonnet-4-6"},
-				"bedrock-backend-haiku": {"claude-haiku-4-5"},
+				"gateway/bedrock-backend":       {"claude-sonnet-4-6"},
+				"gateway/bedrock-backend-haiku": {"claude-haiku-4-5"},
 			},
 		}
 		require.NoError(t, enableQuotaRateLimitOnRoute(logr.Discard(), route3, mixedPolicies, modelInfo))

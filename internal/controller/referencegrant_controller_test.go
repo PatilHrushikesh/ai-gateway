@@ -23,6 +23,7 @@ import (
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gwapiv1b1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
+	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
 )
 
@@ -1059,4 +1060,35 @@ func TestReferenceGrantController_BackendSecurityPolicyReferencesNamespace_OIDC(
 	}
 	require.True(t, c.backendSecurityPolicyReferencesNamespace(bsp, "shared"))
 	require.False(t, c.backendSecurityPolicyReferencesNamespace(bsp, "other"))
+}
+
+func TestReferenceGrantController_AffectedQuotaPolicies(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, gwapiv1b1.Install(scheme))
+	require.NoError(t, aigv1a1.AddToScheme(scheme))
+	require.NoError(t, aigv1b1.AddToScheme(scheme))
+
+	remote := ptr.To(gwapiv1.Namespace("providers"))
+	remotePolicy := &aigv1a1.QuotaPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "remote", Namespace: "platform"},
+		Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []aigv1a1.QuotaPolicyTargetReference{{
+			Name: "provider", Namespace: remote,
+		}}},
+	}
+	localPolicy := &aigv1a1.QuotaPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "local", Namespace: "providers"},
+		Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []aigv1a1.QuotaPolicyTargetReference{{
+			Name: "provider",
+		}}},
+	}
+	builder := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(remotePolicy, localPolicy).
+		WithIndex(&aigv1a1.QuotaPolicy{}, k8sClientIndexQuotaPolicyTargetNamespace, quotaPolicyTargetNamespaceIndexFunc)
+	c := NewReferenceGrantController(builder.Build(), logr.Discard(),
+		make(chan event.GenericEvent, 10), make(chan event.GenericEvent, 10), make(chan event.GenericEvent, 10))
+
+	affected, err := c.getAffectedQuotaPolicies(t.Context(), "providers")
+	require.NoError(t, err)
+	require.Len(t, affected, 1)
+	require.Equal(t, "remote", affected[0].Name)
 }

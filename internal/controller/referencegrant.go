@@ -14,10 +14,16 @@ import (
 )
 
 const (
+	// AIServiceBackendGroup is the API group for AIServiceBackend resources.
+	AIServiceBackendGroup = aiServiceBackendGroup
+	// AIServiceBackendKind is the kind for AIServiceBackend resources.
+	AIServiceBackendKind = aiServiceBackendKind
 	// aiGatewayRouteKind is the kind for AIGatewayRoute.
 	aiGatewayRouteKind = "AIGatewayRoute"
 	// backendSecurityPolicyKind is the kind for BackendSecurityPolicy.
 	backendSecurityPolicyKind = "BackendSecurityPolicy"
+	// quotaPolicyKind is the kind for QuotaPolicy.
+	quotaPolicyKind = "QuotaPolicy"
 	// secretGroup is the API group for the core Secret resource (the core group is the empty string).
 	secretGroup = ""
 	// secretKind is the kind for the core Secret resource.
@@ -54,6 +60,34 @@ func (v *referenceGrantValidator) validateAIServiceBackendReference(
 	return v.validateReference(ctx,
 		aiServiceBackendGroup, aiGatewayRouteKind, routeNamespace,
 		aiServiceBackendGroup, aiServiceBackendKind, backendNamespace, backendName)
+}
+
+// validateQuotaPolicyAIServiceBackendReference validates that a QuotaPolicy can
+// reference an AIServiceBackend in another namespace.
+func (v *referenceGrantValidator) validateQuotaPolicyAIServiceBackendReference(
+	ctx context.Context,
+	policyNamespace string,
+	backendNamespace string,
+	backendName string,
+) error {
+	return v.validateReference(ctx,
+		aiServiceBackendGroup, quotaPolicyKind, policyNamespace,
+		aiServiceBackendGroup, aiServiceBackendKind, backendNamespace, backendName)
+}
+
+// ValidateQuotaPolicyAIServiceBackendReference validates a QuotaPolicy to
+// AIServiceBackend reference using the repository's shared ReferenceGrant
+// implementation. It is exported for consumers outside the controller package
+// that independently materialize quota configuration.
+func ValidateQuotaPolicyAIServiceBackendReference(
+	ctx context.Context,
+	c client.Client,
+	policyNamespace string,
+	backendNamespace string,
+	backendName string,
+) error {
+	return newReferenceGrantValidator(c).validateQuotaPolicyAIServiceBackendReference(
+		ctx, policyNamespace, backendNamespace, backendName)
 }
 
 // validateInferencePoolReference validates that an AIGatewayRoute can reference an InferencePool

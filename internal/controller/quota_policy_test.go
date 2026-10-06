@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gwapiv1b1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
@@ -579,6 +580,77 @@ func Test_quotaPolicyTargetRefsIndexFunc(t *testing.T) {
 		client.MatchingFields{k8sClientIndexAIServiceBackendToTargetingQuotaPolicy: "nonexistent.default"})
 	require.NoError(t, err)
 	require.Empty(t, policies.Items)
+}
+
+func TestQuotaPolicyController_CrossNamespaceReferenceGrant(t *testing.T) {
+	t.Run("rejects before reading unauthorized remote backend", func(t *testing.T) {
+		fakeClient := requireNewFakeClientWithIndexesForQuotaPolicy(t)
+		controller := NewQuotaPolicyController(fakeClient, fake2.NewClientset(), ctrl.Log, newTestRunner(t), make(chan event.GenericEvent, 10))
+
+		backend := &aigv1b1.AIServiceBackend{ObjectMeta: metav1.ObjectMeta{
+			Name: "provider", Namespace: "providers",
+		}}
+		policy := &aigv1a1.QuotaPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "budget", Namespace: "platform"},
+			Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []aigv1a1.QuotaPolicyTargetReference{{
+				Group: "aigateway.envoyproxy.io", Kind: "AIServiceBackend",
+				Name: "provider", Namespace: ptrTo(gwapiv1.Namespace("providers")),
+			}}},
+		}
+		require.NoError(t, fakeClient.Create(t.Context(), backend))
+		require.NoError(t, fakeClient.Create(t.Context(), policy))
+
+		_, err := controller.Reconcile(t.Context(), reconcile.Request{
+			NamespacedName: types.NamespacedName{Namespace: "platform", Name: "budget"},
+		})
+		require.Error(t, err)
+		var updated aigv1a1.QuotaPolicy
+		require.NoError(t, fakeClient.Get(t.Context(), client.ObjectKeyFromObject(policy), &updated))
+		require.Equal(t, aigv1a1.ConditionTypeNotAccepted, updated.Status.Conditions[0].Type)
+		require.Equal(t, aigv1a1.ConditionReasonRefNotPermitted, updated.Status.Conditions[0].Reason)
+	})
+
+	t.Run("accepts a valid remote grant", func(t *testing.T) {
+		fakeClient := requireNewFakeClientWithIndexesForQuotaPolicy(t)
+		controller := NewQuotaPolicyController(fakeClient, fake2.NewClientset(), ctrl.Log, newTestRunner(t), make(chan event.GenericEvent, 10))
+		backend := &aigv1b1.AIServiceBackend{ObjectMeta: metav1.ObjectMeta{
+			Name: "provider", Namespace: "providers",
+		}}
+		policy := &aigv1a1.QuotaPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "budget", Namespace: "platform"},
+			Spec: aigv1a1.QuotaPolicySpec{
+				TargetRefs: []aigv1a1.QuotaPolicyTargetReference{{
+					Group: "aigateway.envoyproxy.io", Kind: "AIServiceBackend",
+					Name: "provider", Namespace: ptrTo(gwapiv1.Namespace("providers")),
+				}},
+				ServiceQuota: aigv1a1.ServiceQuotaDefinition{
+					Quota: aigv1a1.QuotaValue{Limit: 100, Duration: "1h"},
+				},
+			},
+		}
+		grant := &gwapiv1b1.ReferenceGrant{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-quota", Namespace: "providers"},
+			Spec: gwapiv1b1.ReferenceGrantSpec{
+				From: []gwapiv1b1.ReferenceGrantFrom{{
+					Group: aiServiceBackendGroup, Kind: quotaPolicyKind, Namespace: "platform",
+				}},
+				To: []gwapiv1b1.ReferenceGrantTo{{
+					Group: aiServiceBackendGroup, Kind: aiServiceBackendKind,
+				}},
+			},
+		}
+		require.NoError(t, fakeClient.Create(t.Context(), backend))
+		require.NoError(t, fakeClient.Create(t.Context(), policy))
+		require.NoError(t, fakeClient.Create(t.Context(), grant))
+
+		_, err := controller.Reconcile(t.Context(), reconcile.Request{
+			NamespacedName: types.NamespacedName{Namespace: "platform", Name: "budget"},
+		})
+		require.NoError(t, err)
+		var updated aigv1a1.QuotaPolicy
+		require.NoError(t, fakeClient.Get(t.Context(), client.ObjectKeyFromObject(policy), &updated))
+		require.Equal(t, aigv1a1.ConditionTypeAccepted, updated.Status.Conditions[0].Type)
+	})
 }
 
 func ptrTo[T any](v T) *T {

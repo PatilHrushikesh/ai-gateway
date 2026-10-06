@@ -798,6 +798,68 @@ func TestReferenceGrantValidator_WithIndex(t *testing.T) {
 	})
 }
 
+func TestReferenceGrantValidator_ValidateQuotaPolicyAIServiceBackendReference(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, gwapiv1b1.Install(scheme))
+	require.NoError(t, aigv1a1.AddToScheme(scheme))
+
+	newClient := func(grants ...client.Object) client.Client {
+		return fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(grants...).
+			WithIndex(&gwapiv1b1.ReferenceGrant{}, k8sClientIndexReferenceGrantToTargetKind, referenceGrantToTargetKindIndexFunc).
+			Build()
+	}
+	validGrant := func(name *gwapiv1b1.ObjectName) *gwapiv1b1.ReferenceGrant {
+		return &gwapiv1b1.ReferenceGrant{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-quota", Namespace: "providers"},
+			Spec: gwapiv1b1.ReferenceGrantSpec{
+				From: []gwapiv1b1.ReferenceGrantFrom{{
+					Group:     aiServiceBackendGroup,
+					Kind:      quotaPolicyKind,
+					Namespace: "platform",
+				}},
+				To: []gwapiv1b1.ReferenceGrantTo{{
+					Group: aiServiceBackendGroup,
+					Kind:  aiServiceBackendKind,
+					Name:  name,
+				}},
+			},
+		}
+	}
+
+	t.Run("same namespace does not require grant", func(t *testing.T) {
+		v := newReferenceGrantValidator(newClient())
+		require.NoError(t, v.validateQuotaPolicyAIServiceBackendReference(
+			t.Context(), "platform", "platform", "provider"))
+	})
+	t.Run("valid named grant", func(t *testing.T) {
+		v := newReferenceGrantValidator(newClient(validGrant(ptr.To(gwapiv1b1.ObjectName("provider")))))
+		require.NoError(t, v.validateQuotaPolicyAIServiceBackendReference(
+			t.Context(), "platform", "providers", "provider"))
+		require.Error(t, v.validateQuotaPolicyAIServiceBackendReference(
+			t.Context(), "platform", "providers", "other"))
+	})
+	t.Run("kind-wide grant", func(t *testing.T) {
+		v := newReferenceGrantValidator(newClient(validGrant(nil)))
+		require.NoError(t, v.validateQuotaPolicyAIServiceBackendReference(
+			t.Context(), "platform", "providers", "any-provider"))
+	})
+	t.Run("wrong source and target are denied", func(t *testing.T) {
+		wrong := validGrant(nil)
+		wrong.Spec.From[0].Kind = aiGatewayRouteKind
+		v := newReferenceGrantValidator(newClient(wrong))
+		require.Error(t, v.validateQuotaPolicyAIServiceBackendReference(
+			t.Context(), "platform", "providers", "provider"))
+
+		wrong.Spec.From[0].Kind = quotaPolicyKind
+		wrong.Spec.To[0].Kind = "Secret"
+		v = newReferenceGrantValidator(newClient(wrong))
+		require.Error(t, v.validateQuotaPolicyAIServiceBackendReference(
+			t.Context(), "platform", "providers", "provider"))
+	})
+}
+
 // TestGetReferenceGrantIndexKey tests the index key generation
 func TestGetReferenceGrantIndexKey(t *testing.T) {
 	tests := []struct {

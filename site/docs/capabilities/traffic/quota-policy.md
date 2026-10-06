@@ -80,11 +80,33 @@ spec:
       namespace: providers
 ```
 
-The QuotaPolicy-to-AIServiceBackend reference is authorized by Kubernetes RBAC and does not
-require a `ReferenceGrant`. A route that references that backend from another namespace is a
-separate relationship and still requires the normal `ReferenceGrant` in the backend namespace.
-Grant only the controller service account the cross-namespace `get/list/watch` permissions it needs;
-do not treat a QuotaPolicy as permission to route traffic to a backend.
+Same-namespace QuotaPolicy references do not require a `ReferenceGrant`. A cross-namespace
+QuotaPolicy reference must be authorized by a `ReferenceGrant` in the AIServiceBackend namespace.
+The grant must allow `QuotaPolicy` from the policy namespace to reference `AIServiceBackend`; a
+`to.name` restricts the grant to one backend, while an omitted `to.name` allows all AIServiceBackends
+in that namespace:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-platform-quota
+  namespace: providers
+spec:
+  from:
+    - group: aigateway.envoyproxy.io
+      kind: QuotaPolicy
+      namespace: platform
+  to:
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      name: provider # omit name to allow every AIServiceBackend in providers
+```
+
+The QuotaPolicy and route relationships are independent. A route that references this backend from
+another namespace still requires its own route-to-backend `ReferenceGrant`. Grant only the
+controller service account the cross-namespace `get/list/watch` permissions it needs; a QuotaPolicy
+grant does not authorize routing traffic.
 
 :::tip Prerequisites
 Quota enforcement requires two components that are not deployed by the AI Gateway Helm chart today:

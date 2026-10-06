@@ -33,6 +33,7 @@ import (
 
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
+	"github.com/envoyproxy/ai-gateway/internal/controller"
 	"github.com/envoyproxy/ai-gateway/internal/ratelimit/translator"
 )
 
@@ -68,6 +69,13 @@ func (s *Server) maybeInjectQuotaRateLimiting(
 			return clusters, nil
 		}
 		return clusters, fmt.Errorf("failed to list QuotaPolicies: %w", err)
+	}
+	if len(quotaPolicies) == 0 {
+		return clusters, nil
+	}
+	quotaPolicies, err = s.authorizedQuotaPolicies(ctx, quotaPolicies)
+	if err != nil {
+		return clusters, err
 	}
 	if len(quotaPolicies) == 0 {
 		return clusters, nil
@@ -127,6 +135,38 @@ func (s *Server) listQuotaPolicies(ctx context.Context) ([]aigv1a1.QuotaPolicy, 
 		return nil, err
 	}
 	return list.Items, nil
+}
+
+// authorizedQuotaPolicies returns policy copies containing only targetRefs
+// currently authorized by ReferenceGrant. Authorization is performed before
+// any downstream quota action or descriptor generation.
+func (s *Server) authorizedQuotaPolicies(
+	ctx context.Context,
+	policies []aigv1a1.QuotaPolicy,
+) ([]aigv1a1.QuotaPolicy, error) {
+	authorized := make([]aigv1a1.QuotaPolicy, 0, len(policies))
+	for i := range policies {
+		policy := policies[i]
+		targets := make([]aigv1a1.QuotaPolicyTargetReference, 0, len(policy.Spec.TargetRefs))
+		for _, ref := range policy.Spec.TargetRefs {
+			if (ref.Group != "" && ref.Group != controller.AIServiceBackendGroup) ||
+				(ref.Kind != "" && ref.Kind != controller.AIServiceBackendKind) {
+				continue
+			}
+			targetNamespace := ref.GetNamespace(policy.Namespace)
+			if err := controller.ValidateQuotaPolicyAIServiceBackendReference(
+				ctx, s.k8sClient, policy.Namespace, targetNamespace, ref.Name); err != nil {
+				continue
+			}
+			targets = append(targets, ref)
+		}
+		if len(targets) == 0 {
+			continue
+		}
+		policy.Spec.TargetRefs = targets
+		authorized = append(authorized, policy)
+	}
+	return authorized, nil
 }
 
 // buildQuotaBackendPolicies builds a map from "namespace/backendName" keys to the
@@ -605,14 +645,6 @@ func enableQuotaRateLimitOnRoute(_ logr.Logger, route *routev3.Route, policies [
 				}
 				// Default bucket: 3-level stream-done with GenericKey (always fires).
 				if pmq.Quota.DefaultBucket.Limit > 0 {
-					if overrides, ok := modelInfo.backendModels[target.Name]; ok {
-						for _, override := range overrides {
-							if override == modelName {
-								matched = true
-								break
-							}
-						}
-					}
 					defaultKey := translator.DefaultBucketDescriptorKey(len(pmq.Quota.BucketRules))
 					dupDefaultKey := defaultKey
 					if !seenStreamDoneKeys[dupDefaultKey] {
@@ -709,7 +741,6 @@ func buildSimpleModelEntries(modelName, policyNamespace string, targets []aigv1a
 	// Request-time entries only. Stream-done is added once per model in enableQuotaRateLimitOnRoute.
 	for _, target := range targets {
 		targetKey := target.GetNamespace(policyNamespace) + "/" + target.Name
-		targetNamespace := target.GetNamespace(policyNamespace)
 		resolvedModel := resolveModelName(targetKey, modelName, routeModelNames)
 		entries = append(entries, &routev3.RateLimit{
 			Actions: requestTimeBaseActions(target.GetNamespace(policyNamespace), target.Name, resolvedModel),

@@ -1069,12 +1069,12 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 	// Collect backend names and model name overrides on this route.
 	routeBackends := make(map[string]bool)
 	routeModels := make(map[string]bool)
-	for _, rule := range route.Spec.Rules {
-		for _, br := range rule.BackendRefs {
-			routeBackends[br.GetNamespace(route.Namespace)+"/"+br.Name] = true
-			if br.ModelNameOverride != "" {
-				routeModels[br.ModelNameOverride] = true
-			}
+	for _, backend := range ec.Backends {
+		if backend.AIServiceBackendName != "" {
+			routeBackends[backend.AIServiceBackendName] = true
+		}
+		if backend.ModelNameOverride != "" {
+			routeModels[backend.ModelNameOverride] = true
 		}
 	}
 
@@ -1082,10 +1082,20 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 		qp := &quotaPolicies.Items[i]
 		// Check if this policy targets any backend on this route.
 		targetsRoute := false
+		authorizedTargets := make([]aigv1a1.QuotaPolicyTargetReference, 0, len(qp.Spec.TargetRefs))
 		for _, ref := range qp.Spec.TargetRefs {
-			if routeBackends[ref.GetNamespace(qp.Namespace)+"/"+ref.Name] {
+			if (ref.Group != "" && ref.Group != aiServiceBackendGroup) ||
+				(ref.Kind != "" && ref.Kind != aiServiceBackendKind) {
+				continue
+			}
+			targetNamespace := ref.GetNamespace(qp.Namespace)
+			if err := c.referenceGrantValidator.validateQuotaPolicyAIServiceBackendReference(
+				ctx, qp.Namespace, targetNamespace, ref.Name); err != nil {
+				continue
+			}
+			authorizedTargets = append(authorizedTargets, ref)
+			if routeBackends[targetNamespace+"/"+ref.Name] {
 				targetsRoute = true
-				break
 			}
 		}
 		if !targetsRoute {
@@ -1112,7 +1122,7 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 			// One LLMRequestCost per target backend with the Backend and Model filters.
 			// ext_proc only evaluates the entry matching the serving backend and model,
 			// storing the result under the shared metadata key.
-			for _, ref := range qp.Spec.TargetRefs {
+			for _, ref := range authorizedTargets {
 				backendKey := ref.GetNamespace(qp.Namespace) + "/" + ref.Name
 				dedupeKey := QuotaCostMetadataKey + "\x00" + *pmq.ModelName + "\x00" + backendKey
 				if _, exists := injectedQuotaCosts[dedupeKey]; exists {

@@ -513,7 +513,23 @@ func (c *AIGatewayRouteController) computeQuotaPolicyHash(ctx context.Context, r
 			for k := range policies.Items {
 				policy := &policies.Items[k]
 				if policy.DeletionTimestamp.IsZero() {
-					seen[policy.Namespace+"/"+policy.Name] = policy
+					effective := *policy
+					effective.Spec.TargetRefs = nil
+					for _, target := range policy.Spec.TargetRefs {
+						targetNamespace := target.GetNamespace(policy.Namespace)
+						if (target.Group != "" && target.Group != aiServiceBackendGroup) ||
+							(target.Kind != "" && target.Kind != aiServiceBackendKind) {
+							continue
+						}
+						if err := c.referenceGrantValidator.validateQuotaPolicyAIServiceBackendReference(
+							ctx, policy.Namespace, targetNamespace, target.Name); err != nil {
+							continue
+						}
+						effective.Spec.TargetRefs = append(effective.Spec.TargetRefs, target)
+					}
+					if len(effective.Spec.TargetRefs) > 0 {
+						seen[policy.Namespace+"/"+policy.Name] = &effective
+					}
 				}
 			}
 		}
