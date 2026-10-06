@@ -538,7 +538,7 @@ func quotaPolicyTargetRefsIndexFunc(o client.Object) []string {
 	quotaPolicy := o.(*aigv1a1.QuotaPolicy)
 	var ret []string
 	for _, targetRef := range quotaPolicy.Spec.TargetRefs {
-		ret = append(ret, fmt.Sprintf("%s.%s", targetRef.Name, quotaPolicy.Namespace))
+		ret = append(ret, fmt.Sprintf("%s.%s", targetRef.Name, targetRef.GetNamespace(quotaPolicy.Namespace)))
 	}
 	return ret
 }

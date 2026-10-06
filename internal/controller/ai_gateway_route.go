@@ -7,8 +7,12 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	stdjson "encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	egv1a1 "github.com/envoyproxy/gateway/api/v1alpha1"
@@ -25,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
 	"github.com/envoyproxy/ai-gateway/internal/internalapi"
 )
@@ -42,6 +47,7 @@ const (
 	// @see https://gateway.envoyproxy.io/contributions/design/metadata/
 	httpRouteBackendRefPriorityAnnotationKey           = egAnnotationPrefix + "backend-ref-priority"
 	httpRouteAnnotationForAIGatewayGeneratedIndication = egAnnotationPrefix + internalapi.AIGatewayGeneratedHTTPRouteAnnotation
+	httpRouteQuotaPolicyHashAnnotationKey              = "aigateway.envoyproxy.io/quota-policy-hash"
 	egOwningGatewayNameLabel                           = egAnnotationPrefix + "owning-gateway-name"
 	egOwningGatewayNamespaceLabel                      = egAnnotationPrefix + "owning-gateway-namespace"
 	// apiKeyInSecret is the key to store OpenAI API key.
@@ -382,6 +388,15 @@ func (c *AIGatewayRouteController) newHTTPRoute(ctx context.Context, dst *gwapiv
 	// HACK: We need to set an annotation so that Envoy Gateway reconciles the HTTPRoute when the backend refs change.
 	dst.Annotations[httpRouteBackendRefPriorityAnnotationKey] = buildPriorityAnnotation(aiGatewayRoute.Spec.Rules)
 	dst.Annotations[httpRouteAnnotationForAIGatewayGeneratedIndication] = "true"
+	quotaHash, err := c.computeQuotaPolicyHash(ctx, aiGatewayRoute)
+	if err != nil {
+		return fmt.Errorf("failed to compute QuotaPolicy hash: %w", err)
+	}
+	if quotaHash == "" {
+		delete(dst.Annotations, httpRouteQuotaPolicyHashAnnotationKey)
+	} else {
+		dst.Annotations[httpRouteQuotaPolicyHashAnnotationKey] = quotaHash
+	}
 
 	dst.Spec.ParentRefs = aiGatewayRoute.Spec.ParentRefs
 
@@ -480,6 +495,55 @@ func (c *AIGatewayRouteController) updateAIGatewayRouteStatus(ctx context.Contex
 
 // Build an annotation that contains the priority of each backend ref. This is used to ensure Envoy Gateway reconciles the
 // HTTP route when the priorities change.
+func (c *AIGatewayRouteController) computeQuotaPolicyHash(ctx context.Context, route *aigv1b1.AIGatewayRoute) (string, error) {
+	seen := make(map[string]*aigv1a1.QuotaPolicy)
+	for i := range route.Spec.Rules {
+		for j := range route.Spec.Rules[i].BackendRefs {
+			ref := &route.Spec.Rules[i].BackendRefs[j]
+			if ref.IsInferencePool() {
+				continue
+			}
+			backendNamespace := ref.GetNamespace(route.Namespace)
+			key := fmt.Sprintf("%s.%s", ref.Name, backendNamespace)
+			var policies aigv1a1.QuotaPolicyList
+			if err := c.client.List(ctx, &policies,
+				client.MatchingFields{k8sClientIndexAIServiceBackendToTargetingQuotaPolicy: key}); err != nil {
+				return "", fmt.Errorf("failed to list QuotaPolicies for backend %s: %w", key, err)
+			}
+			for k := range policies.Items {
+				policy := &policies.Items[k]
+				if policy.DeletionTimestamp.IsZero() {
+					seen[policy.Namespace+"/"+policy.Name] = policy
+				}
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return "", nil
+	}
+	keys := make([]string, 0, len(seen))
+	for key := range seen {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	type hashedPolicy struct {
+		Namespace string                  `json:"namespace"`
+		Name      string                  `json:"name"`
+		Spec      aigv1a1.QuotaPolicySpec `json:"spec"`
+	}
+	hashed := make([]hashedPolicy, 0, len(keys))
+	for _, key := range keys {
+		policy := seen[key]
+		hashed = append(hashed, hashedPolicy{Namespace: policy.Namespace, Name: policy.Name, Spec: policy.Spec})
+	}
+	data, err := stdjson.Marshal(hashed)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8]), nil
+}
+
 func buildPriorityAnnotation(rules []aigv1b1.AIGatewayRouteRule) string {
 	priorities := make([]string, 0, len(rules))
 	for i, rule := range rules {

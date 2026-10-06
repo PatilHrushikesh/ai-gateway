@@ -61,6 +61,31 @@ metadata, separate limits for input and output tokens, or a monthly or yearly wi
    bucket rule).
 4. When all related quota buckets for that model are exceeded, subsequent matching requests receive `429 Too Many Requests`.
 
+### Cross-Namespace Backends
+
+`targetRefs[].namespace` is optional. If it is omitted, the backend is looked up in the
+`QuotaPolicy` namespace. Set it explicitly when the policy and backend are in different namespaces:
+
+```yaml
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: QuotaPolicy
+metadata:
+  name: shared-provider-budget
+  namespace: platform
+spec:
+  targetRefs:
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      name: provider
+      namespace: providers
+```
+
+The QuotaPolicy-to-AIServiceBackend reference is authorized by Kubernetes RBAC and does not
+require a `ReferenceGrant`. A route that references that backend from another namespace is a
+separate relationship and still requires the normal `ReferenceGrant` in the backend namespace.
+Grant only the controller service account the cross-namespace `get/list/watch` permissions it needs;
+do not treat a QuotaPolicy as permission to route traffic to a backend.
+
 :::tip Prerequisites
 Quota enforcement requires two components that are not deployed by the AI Gateway Helm chart today:
 
@@ -79,6 +104,9 @@ required for a QuotaPolicy-only deployment, although both services can use the s
 By default, `controller.quotaRateLimitFailureModeDeny` is `false`. If the dedicated service is absent
 or unreachable, quota checks fail open and requests continue without enforcement. Set it to `true`
 if unavailable quota enforcement should reject requests instead.
+
+For a complete deployment guide, including Redis Sentinel, xDS, service discovery, verification, and
+troubleshooting, see [Quota Policy Rate-Limit Service Setup](./quota-policy-rate-limit-setup.md).
 :::
 
 ## Configuration

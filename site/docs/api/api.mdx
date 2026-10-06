@@ -617,6 +617,7 @@ QuotaPolicyList contains a list of QuotaPolicy
 - [QuotaDefinition](#github-com-envoyproxy-ai-gateway-api-v1alpha1-quotadefinition)
 - [QuotaPolicySpec](#github-com-envoyproxy-ai-gateway-api-v1alpha1-quotapolicyspec)
 - [QuotaPolicyStatus](#github-com-envoyproxy-ai-gateway-api-v1alpha1-quotapolicystatus)
+- [QuotaPolicyTargetReference](#github-com-envoyproxy-ai-gateway-api-v1alpha1-quotapolicytargetreference)
 - [QuotaRule](#github-com-envoyproxy-ai-gateway-api-v1alpha1-quotarule)
 - [QuotaValue](#github-com-envoyproxy-ai-gateway-api-v1alpha1-quotavalue)
 - [ServiceQuotaDefinition](#github-com-envoyproxy-ai-gateway-api-v1alpha1-servicequotadefinition)
@@ -2488,7 +2489,7 @@ QuotaPolicySpec specifies rules for computing token based costs of requests.
 
 <ApiField
   name="targetRefs"
-  type="[LocalPolicyTargetReference](https://gateway-api.sigs.k8s.io/reference/spec/#gateway.networking.k8s.io/v1alpha2.LocalPolicyTargetReference) array"
+  type="[QuotaPolicyTargetReference](#github-com-envoyproxy-ai-gateway-api-v1alpha1-quotapolicytargetreference) array"
   required="false"
   description="TargetRefs are the names of the AIServiceBackend resources this QuotaPolicy is being attached to."
 /><ApiField
@@ -2522,6 +2523,47 @@ QuotaPolicyStatus contains the conditions by the reconciliation result.
   type="[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.29/#condition-v1-meta) array"
   required="true"
   description="Conditions is the list of conditions by the reconciliation result.<br />Currently, at most one condition is set.<br />Known .status.conditions.type are: `Accepted`, `NotAccepted`."
+/>
+
+
+#### <a id="github-com-envoyproxy-ai-gateway-api-v1alpha1-quotapolicytargetreference">QuotaPolicyTargetReference</a>
+
+
+
+**Appears in:**
+- [QuotaPolicySpec](#github-com-envoyproxy-ai-gateway-api-v1alpha1-quotapolicyspec)
+
+QuotaPolicyTargetReference identifies an AIServiceBackend targeted by a
+QuotaPolicy. If Namespace is omitted, the backend is resolved in the
+QuotaPolicy's namespace. Unlike route backend references, this reference is
+intentionally not restricted to the policy namespace.
+
+##### Fields
+
+
+
+<ApiField
+  name="group"
+  type="string"
+  required="false"
+  defaultValue="aigateway.envoyproxy.io"
+  description="Group is the group of the target resource."
+/><ApiField
+  name="kind"
+  type="string"
+  required="false"
+  defaultValue="AIServiceBackend"
+  description="Kind is the kind of the target resource."
+/><ApiField
+  name="name"
+  type="string"
+  required="true"
+  description="Name is the name of the target AIServiceBackend."
+/><ApiField
+  name="namespace"
+  type="[Namespace](https://gateway-api.sigs.k8s.io/reference/spec/?h=httproutetimeouts#namespace)"
+  required="false"
+  description="Namespace is the namespace of the target AIServiceBackend. When omitted,<br />it defaults to the QuotaPolicy namespace."
 />
 
 

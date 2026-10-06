@@ -20,7 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
-	gwapiv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
@@ -79,11 +78,11 @@ func TestQuotaPolicyController_Reconcile(t *testing.T) {
 	qp := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "myquotapolicy", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
-					Name:  gwapiv1.ObjectName("mybackend"),
+					Name:  "mybackend",
 				},
 			},
 			ServiceQuota: aigv1a1.ServiceQuotaDefinition{
@@ -146,11 +145,11 @@ func TestQuotaPolicyController_Reconcile_SyncError(t *testing.T) {
 	qp := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "qp-sync-error", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
-					Name:  gwapiv1.ObjectName(backend.Name),
+					Name:  backend.Name,
 				},
 			},
 			ServiceQuota: aigv1a1.ServiceQuotaDefinition{
@@ -195,11 +194,11 @@ func TestQuotaPolicyController_Reconcile_InvalidDuration(t *testing.T) {
 	qp := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "qp-invalid-duration", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
-					Name:  gwapiv1.ObjectName(backend.Name),
+					Name:  backend.Name,
 				},
 			},
 			ServiceQuota: aigv1a1.ServiceQuotaDefinition{
@@ -245,11 +244,11 @@ func TestQuotaPolicyController_Reconcile_Deletion(t *testing.T) {
 	qp := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "qp-delete", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
-					Name:  gwapiv1.ObjectName(backend.Name),
+					Name:  backend.Name,
 				},
 			},
 			ServiceQuota: aigv1a1.ServiceQuotaDefinition{
@@ -306,7 +305,7 @@ func TestQuotaPolicyController_Reconcile_MultipleBackends(t *testing.T) {
 	qp := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "qp-multi-backend", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
@@ -358,11 +357,11 @@ func TestQuotaPolicyController_Reconcile_PerModelQuotas(t *testing.T) {
 	qp := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "qp-per-model", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
-					Name:  gwapiv1.ObjectName(backend.Name),
+					Name:  backend.Name,
 				},
 			},
 			PerModelQuotas: []aigv1a1.PerModelQuota{
@@ -400,7 +399,7 @@ func TestQuotaPolicyController_BackendToQuotaPolicy(t *testing.T) {
 	qp1 := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "qp-1", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
@@ -415,7 +414,7 @@ func TestQuotaPolicyController_BackendToQuotaPolicy(t *testing.T) {
 	qp2 := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "qp-2", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
@@ -430,7 +429,7 @@ func TestQuotaPolicyController_BackendToQuotaPolicy(t *testing.T) {
 	qp3 := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "qp-3", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{
 					Kind:  "AIServiceBackend",
 					Group: "aigateway.envoyproxy.io",
@@ -503,7 +502,7 @@ func TestQuotaPolicyController_Reconcile_MultiplePolicies(t *testing.T) {
 	qp1 := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "policy-1", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{Kind: "AIServiceBackend", Group: "aigateway.envoyproxy.io", Name: "be-1"},
 			},
 			ServiceQuota: aigv1a1.ServiceQuotaDefinition{
@@ -514,7 +513,7 @@ func TestQuotaPolicyController_Reconcile_MultiplePolicies(t *testing.T) {
 	qp2 := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "policy-2", Namespace: namespace},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{Kind: "AIServiceBackend", Group: "aigateway.envoyproxy.io", Name: "be-2"},
 			},
 			ServiceQuota: aigv1a1.ServiceQuotaDefinition{
@@ -545,9 +544,10 @@ func Test_quotaPolicyTargetRefsIndexFunc(t *testing.T) {
 	qp := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "indexed-qp", Namespace: "default"},
 		Spec: aigv1a1.QuotaPolicySpec{
-			TargetRefs: []gwapiv1a2.LocalPolicyTargetReference{
+			TargetRefs: []aigv1a1.QuotaPolicyTargetReference{
 				{Kind: "AIServiceBackend", Group: "aigateway.envoyproxy.io", Name: "target-1"},
 				{Kind: "AIServiceBackend", Group: "aigateway.envoyproxy.io", Name: "target-2"},
+				{Kind: "AIServiceBackend", Group: "aigateway.envoyproxy.io", Name: "target-3", Namespace: ptrTo(gwapiv1.Namespace("backend-ns"))},
 			},
 		},
 	}
@@ -557,6 +557,12 @@ func Test_quotaPolicyTargetRefsIndexFunc(t *testing.T) {
 	var policies aigv1a1.QuotaPolicyList
 	err := fakeClient.List(t.Context(), &policies,
 		client.MatchingFields{k8sClientIndexAIServiceBackendToTargetingQuotaPolicy: "target-1.default"})
+	require.NoError(t, err)
+	require.Len(t, policies.Items, 1)
+	require.Equal(t, "indexed-qp", policies.Items[0].Name)
+
+	err = fakeClient.List(t.Context(), &policies,
+		client.MatchingFields{k8sClientIndexAIServiceBackendToTargetingQuotaPolicy: "target-3.backend-ns"})
 	require.NoError(t, err)
 	require.Len(t, policies.Items, 1)
 	require.Equal(t, "indexed-qp", policies.Items[0].Name)

@@ -486,6 +486,9 @@ func (c *GatewayController) reconcileFilterConfigSecret(
 
 				var bsp *aigv1b1.BackendSecurityPolicy
 				backendNamespace := backendRef.GetNamespace(aiGatewayRoute.Namespace)
+				if !backendRef.IsInferencePool() {
+					b.AIServiceBackendName = backendNamespace + "/" + backendRef.Name
+				}
 
 				if backendRef.IsCrossNamespace(aiGatewayRoute.Namespace) {
 					var rgErr error
@@ -1058,7 +1061,7 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 	routeName string,
 ) {
 	var quotaPolicies aigv1a1.QuotaPolicyList
-	if err := c.client.List(ctx, &quotaPolicies, client.InNamespace(route.Namespace)); err != nil {
+	if err := c.client.List(ctx, &quotaPolicies); err != nil {
 		c.logger.Error(err, "failed to list QuotaPolicies for cost expression injection")
 		return
 	}
@@ -1068,7 +1071,7 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 	routeModels := make(map[string]bool)
 	for _, rule := range route.Spec.Rules {
 		for _, br := range rule.BackendRefs {
-			routeBackends[br.Name] = true
+			routeBackends[br.GetNamespace(route.Namespace)+"/"+br.Name] = true
 			if br.ModelNameOverride != "" {
 				routeModels[br.ModelNameOverride] = true
 			}
@@ -1080,7 +1083,7 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 		// Check if this policy targets any backend on this route.
 		targetsRoute := false
 		for _, ref := range qp.Spec.TargetRefs {
-			if routeBackends[string(ref.Name)] {
+			if routeBackends[ref.GetNamespace(qp.Namespace)+"/"+ref.Name] {
 				targetsRoute = true
 				break
 			}
@@ -1110,7 +1113,7 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 			// ext_proc only evaluates the entry matching the serving backend and model,
 			// storing the result under the shared metadata key.
 			for _, ref := range qp.Spec.TargetRefs {
-				backendKey := route.Namespace + "/" + string(ref.Name)
+				backendKey := ref.GetNamespace(qp.Namespace) + "/" + ref.Name
 				dedupeKey := QuotaCostMetadataKey + "\x00" + *pmq.ModelName + "\x00" + backendKey
 				if _, exists := injectedQuotaCosts[dedupeKey]; exists {
 					continue

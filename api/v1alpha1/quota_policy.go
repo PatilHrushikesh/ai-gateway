@@ -8,7 +8,7 @@ package v1alpha1
 import (
 	egv1a1 "github.com/envoyproxy/gateway/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	gwapiv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
+	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 // QuotaPolicy specifies token quota configuration for inference services.
@@ -38,7 +38,7 @@ type QuotaPolicySpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:XValidation:rule="self.all(ref, ref.group == 'aigateway.envoyproxy.io' && ref.kind == 'AIServiceBackend')", message="targetRefs must reference AIServiceBackend resources"
-	TargetRefs []gwapiv1a2.LocalPolicyTargetReference `json:"targetRefs,omitempty"`
+	TargetRefs []QuotaPolicyTargetReference `json:"targetRefs,omitempty"`
 	// Quota for all models served by AIServiceBackend(s). This value can be overridden for specific models using the "PerModelQuotas"
 	// configuration.
 	//
@@ -57,6 +57,47 @@ type QuotaPolicySpec struct {
 	// +kubebuilder:validation:MaxItems=128
 	// +optional
 	PerModelQuotas []PerModelQuota `json:"perModelQuotas,omitempty"`
+}
+
+// QuotaPolicyTargetReference identifies an AIServiceBackend targeted by a
+// QuotaPolicy. If Namespace is omitted, the backend is resolved in the
+// QuotaPolicy's namespace. Unlike route backend references, this reference is
+// intentionally not restricted to the policy namespace.
+type QuotaPolicyTargetReference struct {
+	// Group is the group of the target resource.
+	//
+	// +optional
+	// +kubebuilder:default=aigateway.envoyproxy.io
+	// +kubebuilder:validation:MaxLength=253
+	Group string `json:"group,omitempty"`
+
+	// Kind is the kind of the target resource.
+	//
+	// +optional
+	// +kubebuilder:default=AIServiceBackend
+	// +kubebuilder:validation:MaxLength=63
+	Kind string `json:"kind,omitempty"`
+
+	// Name is the name of the target AIServiceBackend.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Namespace is the namespace of the target AIServiceBackend. When omitted,
+	// it defaults to the QuotaPolicy namespace.
+	//
+	// +optional
+	Namespace *gwapiv1.Namespace `json:"namespace,omitempty"`
+}
+
+// GetNamespace returns the referenced backend namespace, defaulting to the
+// namespace containing the QuotaPolicy.
+func (r QuotaPolicyTargetReference) GetNamespace(policyNamespace string) string {
+	if r.Namespace == nil || *r.Namespace == "" {
+		return policyNamespace
+	}
+	return string(*r.Namespace)
 }
 
 type ServiceQuotaDefinition struct {
