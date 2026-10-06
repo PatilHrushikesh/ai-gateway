@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gwapiv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 	gwapiv1b1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
@@ -1071,13 +1072,13 @@ func TestReferenceGrantController_AffectedQuotaPolicies(t *testing.T) {
 	remote := ptr.To(gwapiv1.Namespace("providers"))
 	remotePolicy := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "remote", Namespace: "platform"},
-		Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []aigv1a1.QuotaPolicyTargetReference{{
+		Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []gwapiv1a2.NamespacedPolicyTargetReference{{
 			Name: "provider", Namespace: remote,
 		}}},
 	}
 	localPolicy := &aigv1a1.QuotaPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "local", Namespace: "providers"},
-		Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []aigv1a1.QuotaPolicyTargetReference{{
+		Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []gwapiv1a2.NamespacedPolicyTargetReference{{
 			Name: "provider",
 		}}},
 	}

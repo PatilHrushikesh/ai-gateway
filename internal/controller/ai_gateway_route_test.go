@@ -27,6 +27,7 @@ import (
 	gwapiv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 	gwapiv1b1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
+	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
 	internaltesting "github.com/envoyproxy/ai-gateway/internal/testing"
 )
@@ -986,6 +987,25 @@ func TestAIGatewayRouteController_CrossNamespaceBackend_WithReferenceGrant(t *te
 	require.NoError(t, err)
 	require.Len(t, updatedRoute.Status.Conditions, 1)
 	require.Equal(t, aigv1b1.ConditionTypeAccepted, updatedRoute.Status.Conditions[0].Type)
+}
+
+func TestHashQuotaPolicies(t *testing.T) {
+	policyA := &aigv1a1.QuotaPolicy{ObjectMeta: metav1.ObjectMeta{
+		Name: "policy-a", Namespace: "namespace-a",
+	}}
+	policyB := &aigv1a1.QuotaPolicy{ObjectMeta: metav1.ObjectMeta{
+		Name: "policy-b", Namespace: "namespace-b",
+	}}
+
+	hash, err := hashQuotaPolicies([]*aigv1a1.QuotaPolicy{policyB, policyA})
+	require.NoError(t, err)
+	require.Len(t, hash, 8)
+
+	reversedHash, err := hashQuotaPolicies([]*aigv1a1.QuotaPolicy{policyA, policyB})
+	require.NoError(t, err)
+	require.Equal(t, hash, reversedHash)
+	require.Empty(t, policyA.Spec.TargetRefs)
+	require.Empty(t, policyB.Spec.TargetRefs)
 }
 
 func TestAIGatewayRouteController_CrossNamespaceBackend_WithoutReferenceGrant(t *testing.T) {

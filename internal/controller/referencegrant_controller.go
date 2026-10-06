@@ -157,7 +157,7 @@ func (c *ReferenceGrantController) getAffectedQuotaPolicies(
 			continue
 		}
 		for _, ref := range policy.Spec.TargetRefs {
-			if ref.GetNamespace(policy.Namespace) != grantNamespace {
+			if quotaPolicyTargetNamespace(ref, policy.Namespace) != grantNamespace {
 				continue
 			}
 			if (ref.Group == "" || ref.Group == aiServiceBackendGroup) &&

@@ -1,9 +1,9 @@
----
 # Copyright Envoy AI Gateway Authors
 # SPDX-License-Identifier: Apache-2.0
 # The full text of the Apache license is available in the LICENSE file at
 # the root of the repo.
 
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -412,34 +412,42 @@ spec:
                   this QuotaPolicy is being attached to.
                 items:
                   description: |-
-                    QuotaPolicyTargetReference identifies an AIServiceBackend targeted by a
-                    QuotaPolicy. If Namespace is omitted, the backend is resolved in the
-                    QuotaPolicy's namespace. Unlike route backend references, this reference is
-                    intentionally not restricted to the policy namespace.
+                    NamespacedPolicyTargetReference identifies an API object to apply a direct or
+                    inherited policy to, potentially in a different namespace. This should only
+                    be used as part of Policy resources that need to be able to target resources
+                    in different namespaces. For more information on how this policy attachment
+                    model works, and a sample Policy resource, refer to the policy attachment
+                    documentation for Gateway API.
                   properties:
                     group:
-                      default: aigateway.envoyproxy.io
                       description: Group is the group of the target resource.
                       maxLength: 253
+                      pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                       type: string
                     kind:
-                      default: AIServiceBackend
-                      description: Kind is the kind of the target resource.
+                      description: Kind is kind of the target resource.
                       maxLength: 63
+                      minLength: 1
+                      pattern: ^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$
                       type: string
                     name:
-                      description: Name is the name of the target AIServiceBackend.
+                      description: Name is the name of the target resource.
+                      maxLength: 253
                       minLength: 1
                       type: string
                     namespace:
                       description: |-
-                        Namespace is the namespace of the target AIServiceBackend. When omitted,
-                        it defaults to the QuotaPolicy namespace.
+                        Namespace is the namespace of the referent. When unspecified, the local
+                        namespace is inferred. Even when policy targets a resource in a different
+                        namespace, it MUST only apply to traffic originating from the same
+                        namespace as the policy.
                       maxLength: 63
                       minLength: 1
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
                   required:
+                  - group
+                  - kind
                   - name
                   type: object
                 maxItems: 16

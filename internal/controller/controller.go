@@ -553,7 +553,7 @@ func quotaPolicyTargetRefsIndexFunc(o client.Object) []string {
 	quotaPolicy := o.(*aigv1a1.QuotaPolicy)
 	var ret []string
 	for _, targetRef := range quotaPolicy.Spec.TargetRefs {
-		ret = append(ret, fmt.Sprintf("%s.%s", targetRef.Name, targetRef.GetNamespace(quotaPolicy.Namespace)))
+		ret = append(ret, fmt.Sprintf("%s.%s", targetRef.Name, quotaPolicyTargetNamespace(targetRef, quotaPolicy.Namespace)))
 	}
 	return ret
 }
@@ -563,7 +563,7 @@ func quotaPolicyTargetNamespaceIndexFunc(o client.Object) []string {
 	namespaces := make([]string, 0, len(quotaPolicy.Spec.TargetRefs))
 	seen := make(map[string]struct{}, len(quotaPolicy.Spec.TargetRefs))
 	for _, targetRef := range quotaPolicy.Spec.TargetRefs {
-		namespace := targetRef.GetNamespace(quotaPolicy.Namespace)
+		namespace := quotaPolicyTargetNamespace(targetRef, quotaPolicy.Namespace)
 		if _, ok := seen[namespace]; ok {
 			continue
 		}

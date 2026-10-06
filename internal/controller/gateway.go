@@ -31,6 +31,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gwapiv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 	"sigs.k8s.io/yaml"
 
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
@@ -592,7 +593,7 @@ func (c *GatewayController) reconcileFilterConfigSecret(
 			}
 			// Inject QuotaPolicy cost expressions as LLMRequestCost entries so ext_proc
 			// computes and stores them in metadata for the HitsAddend to read.
-			c.injectQuotaPolicyCostExpressions(ctx, aiGatewayRoute, ec, injectedQuotaCosts, routeName)
+			c.injectQuotaPolicyCostExpressions(ctx, ec, injectedQuotaCosts, routeName)
 
 			for _, fc := range dedup {
 				ec.LLMRequestCosts = append(ec.LLMRequestCosts, fc)
@@ -1055,7 +1056,6 @@ func (c *GatewayController) getBSPSecretRefData(ctx context.Context, bsp *aigv1b
 // dynamic metadata for the rate limit filter's HitsAddend to read.
 func (c *GatewayController) injectQuotaPolicyCostExpressions(
 	ctx context.Context,
-	route *aigv1b1.AIGatewayRoute,
 	ec *filterapi.Config,
 	injectedQuotaCosts map[string]struct{},
 	routeName string,
@@ -1069,7 +1069,8 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 	// Collect backend names and model name overrides on this route.
 	routeBackends := make(map[string]bool)
 	routeModels := make(map[string]bool)
-	for _, backend := range ec.Backends {
+	for i := range ec.Backends {
+		backend := &ec.Backends[i]
 		if backend.AIServiceBackendName != "" {
 			routeBackends[backend.AIServiceBackendName] = true
 		}
@@ -1082,19 +1083,19 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 		qp := &quotaPolicies.Items[i]
 		// Check if this policy targets any backend on this route.
 		targetsRoute := false
-		authorizedTargets := make([]aigv1a1.QuotaPolicyTargetReference, 0, len(qp.Spec.TargetRefs))
+		authorizedTargets := make([]gwapiv1a2.NamespacedPolicyTargetReference, 0, len(qp.Spec.TargetRefs))
 		for _, ref := range qp.Spec.TargetRefs {
 			if (ref.Group != "" && ref.Group != aiServiceBackendGroup) ||
 				(ref.Kind != "" && ref.Kind != aiServiceBackendKind) {
 				continue
 			}
-			targetNamespace := ref.GetNamespace(qp.Namespace)
+			targetNamespace := quotaPolicyTargetNamespace(ref, qp.Namespace)
 			if err := c.referenceGrantValidator.validateQuotaPolicyAIServiceBackendReference(
-				ctx, qp.Namespace, targetNamespace, ref.Name); err != nil {
+				ctx, qp.Namespace, targetNamespace, string(ref.Name)); err != nil {
 				continue
 			}
 			authorizedTargets = append(authorizedTargets, ref)
-			if routeBackends[targetNamespace+"/"+ref.Name] {
+			if routeBackends[targetNamespace+"/"+string(ref.Name)] {
 				targetsRoute = true
 			}
 		}
@@ -1123,7 +1124,7 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 			// ext_proc only evaluates the entry matching the serving backend and model,
 			// storing the result under the shared metadata key.
 			for _, ref := range authorizedTargets {
-				backendKey := ref.GetNamespace(qp.Namespace) + "/" + ref.Name
+				backendKey := quotaPolicyTargetNamespace(ref, qp.Namespace) + "/" + string(ref.Name)
 				dedupeKey := QuotaCostMetadataKey + "\x00" + *pmq.ModelName + "\x00" + backendKey
 				if _, exists := injectedQuotaCosts[dedupeKey]; exists {
 					continue
