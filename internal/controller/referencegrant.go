@@ -35,6 +35,36 @@ type referenceGrantValidator struct {
 	client client.Client
 }
 
+// ReferenceNotPermittedError indicates that a cross-namespace reference was
+// denied because no applicable ReferenceGrant authorized it.
+type ReferenceNotPermittedError struct {
+	FromGroup       string
+	FromKind        string
+	FromNamespace   string
+	TargetGroup     string
+	TargetKind      string
+	TargetNamespace string
+	TargetName      string
+}
+
+func (e *ReferenceNotPermittedError) Error() string {
+	return fmt.Sprintf(
+		"cross-namespace reference from %s in namespace %s to %s %s in namespace %s is not permitted: "+
+			"no valid ReferenceGrant found in namespace %s. "+
+			"A ReferenceGrant must allow %s from namespace %s to reference %s in namespace %s",
+		e.FromKind,
+		e.FromNamespace,
+		e.TargetKind,
+		e.TargetName,
+		e.TargetNamespace,
+		e.TargetNamespace,
+		e.FromKind,
+		e.FromNamespace,
+		e.TargetKind,
+		e.TargetNamespace,
+	)
+}
+
 // NewReferenceGrantValidator creates a new ReferenceGrantValidator.
 func newReferenceGrantValidator(c client.Client) *referenceGrantValidator {
 	return &referenceGrantValidator{client: c}
@@ -174,12 +204,15 @@ func (v *referenceGrantValidator) validateReference(
 		}
 	}
 
-	return fmt.Errorf(
-		"cross-namespace reference from %s in namespace %s to %s %s in namespace %s is not permitted: "+
-			"no valid ReferenceGrant found in namespace %s. "+
-			"A ReferenceGrant must allow %s from namespace %s to reference %s in namespace %s",
-		fromKind, fromNamespace, targetKind, targetName, targetNamespace, targetNamespace, fromKind, fromNamespace, targetKind, targetNamespace,
-	)
+	return &ReferenceNotPermittedError{
+		FromGroup:       string(fromGroup),
+		FromKind:        string(fromKind),
+		FromNamespace:   fromNamespace,
+		TargetGroup:     string(targetGroup),
+		TargetKind:      string(targetKind),
+		TargetNamespace: targetNamespace,
+		TargetName:      targetName,
+	}
 }
 
 // isReferenceGrantValid checks if a ReferenceGrant allows a resource identified by fromGroup/fromKind

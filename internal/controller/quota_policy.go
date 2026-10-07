@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
 	rlsconfv3 "github.com/envoyproxy/go-control-plane/ratelimit/config/ratelimit/v3"
@@ -99,26 +98,24 @@ func (c *QuotaPolicyController) Reconcile(ctx context.Context, req reconcile.Req
 	c.mu.RUnlock()
 	needsRouteRecovery := len(previousTargetKeys) == 0 && quotaPolicyWasAccepted(&quotaPolicy)
 
-	if err := c.syncQuotaPolicy(ctx, &quotaPolicy); err != nil {
+	err := c.syncQuotaPolicy(ctx, &quotaPolicy)
+	if err != nil {
 		reason := "ReconciliationFailed"
-		if strings.Contains(err.Error(), "not permitted") {
+		var referenceErr *ReferenceNotPermittedError
+		if errors.As(err, &referenceErr) {
 			reason = aigv1a1.ConditionReasonRefNotPermitted
 		}
 		c.updateQuotaPolicyStatus(ctx, &quotaPolicy, aigv1a1.ConditionTypeNotAccepted, reason, err.Error())
-		c.notifyAIGatewayRoutes(ctx, &quotaPolicy)
-		c.notifyQuotaPolicyRoutesForKeys(ctx, previousTargetKeys)
-		if needsRouteRecovery {
-			c.notifyAllAIGatewayRoutes(ctx)
-		}
-		return ctrl.Result{}, err
+	} else {
+		c.updateQuotaPolicyStatus(ctx, &quotaPolicy, aigv1a1.ConditionTypeAccepted, "ReconciliationSucceeded", "QuotaPolicy reconciled successfully")
 	}
-	c.updateQuotaPolicyStatus(ctx, &quotaPolicy, aigv1a1.ConditionTypeAccepted, "ReconciliationSucceeded", "QuotaPolicy reconciled successfully")
+
 	c.notifyAIGatewayRoutes(ctx, &quotaPolicy)
 	c.notifyQuotaPolicyRoutesForKeys(ctx, previousTargetKeys)
 	if needsRouteRecovery {
 		c.notifyAllAIGatewayRoutes(ctx)
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, err
 }
 
 func conditionStatus(conditionType string) metav1.ConditionStatus {
