@@ -85,13 +85,12 @@ func (c *ReferenceGrantController) Reconcile(ctx context.Context, req reconcile.
 	return ctrl.Result{}, nil
 }
 
-// triggerAffectedReconciles triggers reconciliation of every AIGatewayRoute and BackendSecurityPolicy
-// that a ReferenceGrant in grantNamespace may affect, whether it was just created, updated, or is
-// about to be deleted.
+// triggerAffectedReconciles triggers reconciliation of every AIGatewayRoute and BackendSecurityPolicy and QuotaPolicy
+// that a ReferenceGrant in grantNamespace may affect, whether it was just created, updated, or is about to be deleted.
 //
-// The set of affected resources is derived from the grant's namespace rather than its current spec:
-// when a grant is narrowed (e.g. a "from" entry is removed), the resources that just lost access are
-// no longer described by the new spec, but they still need to be reconciled to drop that access.
+// The set of affected resources is derived from the grant's namespace rather than its current spec: when a grant is narrowed
+// (e.g. a "from" entry is removed), the resources that just lost access are no longer described by the new spec, but they still
+// need to be reconciled to drop that access.
 func (c *ReferenceGrantController) triggerAffectedReconciles(ctx context.Context, grantNamespace string) error {
 	// Get all AIGatewayRoutes that might be affected by this ReferenceGrant
 	affectedRoutes, err := c.getAffectedAIGatewayRoutes(ctx, grantNamespace)

@@ -127,8 +127,9 @@ By default, `controller.quotaRateLimitFailureModeDeny` is `false`. If the dedica
 or unreachable, quota checks fail open and requests continue without enforcement. Set it to `true`
 if unavailable quota enforcement should reject requests instead.
 
-For a complete deployment guide, including Redis Sentinel, xDS, service discovery, verification, and
-troubleshooting, see [Quota Policy Rate-Limit Service Setup](./quota-policy-rate-limit-setup.md).
+For a deployment example, including the rate-limit service, Redis, xDS, service discovery, and
+verification, see the
+[quota E2E manifest](https://github.com/theagentrouter/agent-router/blob/main/tests/e2e/testdata/backend_quota_ratelimit.yaml).
 :::
 
 ## Configuration
