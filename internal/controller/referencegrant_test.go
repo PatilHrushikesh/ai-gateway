@@ -7,7 +7,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -257,7 +256,7 @@ func TestReferenceGrantValidator_ValidateAIServiceBackendReference(t *testing.T)
 				}
 				if tt.expectedErrorString == "is not permitted" {
 					var referenceErr *ReferenceNotPermittedError
-					require.True(t, errors.As(err, &referenceErr))
+					require.ErrorAs(t, err, &referenceErr)
 					require.Equal(t, tt.backendNamespace, referenceErr.TargetNamespace)
 					require.Equal(t, tt.backendName, referenceErr.TargetName)
 				}
