@@ -1008,6 +1008,57 @@ func TestHashQuotaPolicies(t *testing.T) {
 	require.Empty(t, policyB.Spec.TargetRefs)
 }
 
+func TestFetchEffectiveQuotaPoliciesForRoute(t *testing.T) {
+	fakeClient := requireNewFakeClientWithIndexes(t)
+	eventCh := internaltesting.NewControllerEventChan[*gwapiv1.Gateway]()
+	c := NewAIGatewayRouteController(fakeClient, fake2.NewClientset(), ctrl.Log, eventCh.Ch, "/v1")
+
+	policy := &aigv1a1.QuotaPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "policy", Namespace: "route-ns"},
+		Spec: aigv1a1.QuotaPolicySpec{
+			TargetRefs: []gwapiv1a2.NamespacedPolicyTargetReference{
+				{Group: aiServiceBackendGroup, Kind: aiServiceBackendKind, Name: "backend"},
+				{Group: "unsupported.example.com", Kind: aiServiceBackendKind, Name: "ignored"},
+				{Group: aiServiceBackendGroup, Kind: aiServiceBackendKind, Name: "remote", Namespace: ptr.To(gwapiv1a2.Namespace("backend-ns"))},
+			},
+		},
+	}
+	require.NoError(t, fakeClient.Create(t.Context(), policy))
+
+	grant := &gwapiv1b1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Name: "allow-route-ns", Namespace: "backend-ns"},
+		Spec: gwapiv1b1.ReferenceGrantSpec{
+			From: []gwapiv1b1.ReferenceGrantFrom{{
+				Group: "aigateway.envoyproxy.io", Kind: "QuotaPolicy", Namespace: "route-ns",
+			}},
+			To: []gwapiv1b1.ReferenceGrantTo{{
+				Group: aiServiceBackendGroup, Kind: aiServiceBackendKind, Name: ptr.To(gwapiv1b1.ObjectName("remote")),
+			}},
+		},
+	}
+	require.NoError(t, fakeClient.Create(t.Context(), grant))
+
+	route := &aigv1b1.AIGatewayRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "route-ns"},
+		Spec: aigv1b1.AIGatewayRouteSpec{Rules: []aigv1b1.AIGatewayRouteRule{
+			{BackendRefs: []aigv1b1.AIGatewayRouteRuleBackendRef{
+				{Name: "backend"},
+				{Name: "backend"},
+				{Name: "remote", Namespace: ptr.To(gwapiv1.Namespace("backend-ns"))},
+				{Name: "pool", Group: ptr.To("inference.networking.k8s.io"), Kind: ptr.To("InferencePool")},
+			}},
+		}},
+	}
+
+	policies, err := c.fetchEffectiveQuotaPoliciesForRoute(t.Context(), route)
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	require.Equal(t, "route-ns/policy", policies[0].Namespace+"/"+policies[0].Name)
+	require.Len(t, policies[0].Spec.TargetRefs, 2)
+	require.Equal(t, "backend", string(policies[0].Spec.TargetRefs[0].Name))
+	require.Equal(t, "remote", string(policies[0].Spec.TargetRefs[1].Name))
+}
+
 func TestAIGatewayRouteController_CrossNamespaceBackend_WithoutReferenceGrant(t *testing.T) {
 	fakeClient := requireNewFakeClientWithIndexes(t)
 	eventCh := internaltesting.NewControllerEventChan[*gwapiv1.Gateway]()
