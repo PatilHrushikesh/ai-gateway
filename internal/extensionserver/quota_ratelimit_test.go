@@ -1374,6 +1374,37 @@ func TestEnableQuotaRateLimitOnRoute_MultiplePerModelQuotas(t *testing.T) {
 		require.Len(t, perRoute.RateLimits, 3)
 	})
 
+	t.Run("default bucket matches an explicitly namespaced target", func(t *testing.T) {
+		route4 := &routev3.Route{Name: "test-route-4"}
+		crossNamespacePolicy := []aigv1a1.QuotaPolicy{{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "policy-ns"},
+			Spec: aigv1a1.QuotaPolicySpec{
+				TargetRefs: []gwapiv1a2.NamespacedPolicyTargetReference{{
+					Name:      "bedrock-backend",
+					Namespace: ptr.To(gwapiv1a2.Namespace("backend-ns")),
+				}},
+				PerModelQuotas: []aigv1a1.PerModelQuota{{
+					ModelName: ptr.To("claude-sonnet-4-6"),
+					Quota: aigv1a1.QuotaDefinition{
+						DefaultBucket: aigv1a1.QuotaValue{Limit: 200, Duration: "1m"},
+					},
+				}},
+			},
+		}}
+		modelInfo := &routeModelInfo{
+			backendModels: map[string][]string{
+				"backend-ns/bedrock-backend": {"claude-sonnet-4-6"},
+			},
+		}
+		require.NoError(t, enableQuotaRateLimitOnRoute(logr.Discard(), route4, crossNamespacePolicy, modelInfo))
+
+		perRoute := &ratelimitfilterv3.RateLimitPerRoute{}
+		require.NoError(t, route4.TypedPerFilterConfig[quotaRateLimitFilterName].UnmarshalTo(perRoute))
+		require.Len(t, perRoute.RateLimits, 2)
+		require.Equal(t, "backend-ns/bedrock-backend",
+			perRoute.RateLimits[0].Actions[0].GetGenericKey().DescriptorValue)
+	})
+
 	t.Run("model with bucket rules and model without are handled correctly", func(t *testing.T) {
 		route3 := &routev3.Route{Name: "test-route-3"}
 		mixedPolicies := []aigv1a1.QuotaPolicy{

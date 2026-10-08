@@ -1057,6 +1057,24 @@ func TestFetchEffectiveQuotaPoliciesForRoute(t *testing.T) {
 	require.Len(t, policies[0].Spec.TargetRefs, 2)
 	require.Equal(t, "backend", string(policies[0].Spec.TargetRefs[0].Name))
 	require.Equal(t, "remote", string(policies[0].Spec.TargetRefs[1].Name))
+
+	// Removing a target must be reflected on the next lookup; deduplication
+	// must not retain the previously effective target set.
+	policy.Spec.TargetRefs = []gwapiv1a2.NamespacedPolicyTargetReference{{
+		Group: aiServiceBackendGroup, Kind: aiServiceBackendKind, Name: "backend",
+	}}
+	require.NoError(t, fakeClient.Update(t.Context(), policy))
+	policies, err = c.fetchEffectiveQuotaPoliciesForRoute(t.Context(), route)
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	require.Len(t, policies[0].Spec.TargetRefs, 1)
+	require.Equal(t, "backend", string(policies[0].Spec.TargetRefs[0].Name))
+
+	// Deleting the policy must remove it from the effective result entirely.
+	require.NoError(t, fakeClient.Delete(t.Context(), policy))
+	policies, err = c.fetchEffectiveQuotaPoliciesForRoute(t.Context(), route)
+	require.NoError(t, err)
+	require.Empty(t, policies)
 }
 
 func TestAIGatewayRouteController_CrossNamespaceBackend_WithoutReferenceGrant(t *testing.T) {

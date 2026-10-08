@@ -41,6 +41,7 @@ import (
 
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
+	"github.com/envoyproxy/ai-gateway/internal/quotapolicy"
 	"github.com/envoyproxy/ai-gateway/internal/ratelimit/runner"
 )
 
@@ -553,7 +554,7 @@ func quotaPolicyTargetRefsIndexFunc(o client.Object) []string {
 	quotaPolicy := o.(*aigv1a1.QuotaPolicy)
 	var ret []string
 	for _, targetRef := range quotaPolicy.Spec.TargetRefs {
-		ret = append(ret, fmt.Sprintf("%s.%s", targetRef.Name, quotaPolicyTargetNamespace(targetRef, quotaPolicy.Namespace)))
+		ret = append(ret, fmt.Sprintf("%s.%s", targetRef.Name, quotapolicy.TargetNamespace(targetRef, quotaPolicy.Namespace)))
 	}
 	return ret
 }
@@ -563,7 +564,7 @@ func quotaPolicyTargetNamespaceIndexFunc(o client.Object) []string {
 	namespaces := make([]string, 0, len(quotaPolicy.Spec.TargetRefs))
 	seen := make(map[string]struct{}, len(quotaPolicy.Spec.TargetRefs))
 	for _, targetRef := range quotaPolicy.Spec.TargetRefs {
-		namespace := quotaPolicyTargetNamespace(targetRef, quotaPolicy.Namespace)
+		namespace := quotapolicy.TargetNamespace(targetRef, quotaPolicy.Namespace)
 		if _, ok := seen[namespace]; ok {
 			continue
 		}

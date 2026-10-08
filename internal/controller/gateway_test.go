@@ -83,9 +83,23 @@ func TestInjectQuotaPolicyCostExpressions(t *testing.T) {
 		},
 	}
 	require.NoError(t, fakeClient.Create(t.Context(), policy))
+	unrelatedModel := "unrelated-model"
+	unrelatedPolicy := &aigv1a1.QuotaPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "unrelated-policy", Namespace: "other-ns"},
+		Spec: aigv1a1.QuotaPolicySpec{
+			TargetRefs: []gwapiv1a2.NamespacedPolicyTargetReference{{
+				Group: aiServiceBackendGroup, Kind: aiServiceBackendKind, Name: "other-backend",
+			}},
+			PerModelQuotas: []aigv1a1.PerModelQuota{{
+				ModelName: &unrelatedModel,
+				Quota:     aigv1a1.QuotaDefinition{CostExpression: &expression},
+			}},
+		},
+	}
+	require.NoError(t, fakeClient.Create(t.Context(), unrelatedPolicy))
 	var policies aigv1a1.QuotaPolicyList
 	require.NoError(t, fakeClient.List(t.Context(), &policies))
-	require.Len(t, policies.Items, 1)
+	require.Len(t, policies.Items, 2)
 	require.Equal(t, string(aiServiceBackendGroup), string(policies.Items[0].Spec.TargetRefs[0].Group))
 	require.Equal(t, string(aiServiceBackendKind), string(policies.Items[0].Spec.TargetRefs[0].Kind))
 	require.Len(t, policies.Items[0].Spec.PerModelQuotas, 1)

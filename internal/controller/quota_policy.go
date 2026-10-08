@@ -22,10 +22,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	gwapiv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
+	"github.com/envoyproxy/ai-gateway/internal/quotapolicy"
 	"github.com/envoyproxy/ai-gateway/internal/ratelimit/runner"
 	"github.com/envoyproxy/ai-gateway/internal/ratelimit/translator"
 )
@@ -43,13 +43,6 @@ type QuotaPolicyController struct {
 	configCache       map[string][]*rlsconfv3.RateLimitConfig
 	policyBackendKeys map[string][]string
 	mu                sync.RWMutex
-}
-
-func quotaPolicyTargetNamespace(ref gwapiv1a2.NamespacedPolicyTargetReference, policyNamespace string) string {
-	if ref.Namespace == nil || *ref.Namespace == "" {
-		return policyNamespace
-	}
-	return string(*ref.Namespace)
 }
 
 // NewQuotaPolicyController creates a new reconciler for QuotaPolicy resources.
@@ -143,7 +136,7 @@ func (c *QuotaPolicyController) syncQuotaPolicy(ctx context.Context, policy *aig
 	var backends []*aigv1b1.AIServiceBackend
 	var targetErrors []error
 	for _, ref := range policy.Spec.TargetRefs {
-		targetNamespace := quotaPolicyTargetNamespace(ref, policy.Namespace)
+		targetNamespace := quotapolicy.TargetNamespace(ref, policy.Namespace)
 		if (ref.Group != "" && ref.Group != aiServiceBackendGroup) ||
 			(ref.Kind != "" && ref.Kind != aiServiceBackendKind) {
 			targetErrors = append(targetErrors, fmt.Errorf(
@@ -199,7 +192,7 @@ func (c *QuotaPolicyController) syncQuotaPolicy(ctx context.Context, policy *aig
 	c.configCache[cacheKey] = configs
 	targetKeys := make([]string, 0, len(policy.Spec.TargetRefs))
 	for _, ref := range policy.Spec.TargetRefs {
-		targetKeys = append(targetKeys, fmt.Sprintf("%s.%s", string(ref.Name), quotaPolicyTargetNamespace(ref, policy.Namespace)))
+		targetKeys = append(targetKeys, fmt.Sprintf("%s.%s", string(ref.Name), quotapolicy.TargetNamespace(ref, policy.Namespace)))
 	}
 	c.policyBackendKeys[cacheKey] = targetKeys
 	allConfigs := c.getMergedConfigsLocked()
@@ -331,7 +324,7 @@ func (c *QuotaPolicyController) BackendToQuotaPolicy(ctx context.Context, obj cl
 // to re-translate xDS and call PostTranslateModify with the updated QuotaPolicy.
 func (c *QuotaPolicyController) notifyAIGatewayRoutes(ctx context.Context, policy *aigv1a1.QuotaPolicy) {
 	for _, ref := range policy.Spec.TargetRefs {
-		key := fmt.Sprintf("%s.%s", string(ref.Name), quotaPolicyTargetNamespace(ref, policy.Namespace))
+		key := fmt.Sprintf("%s.%s", string(ref.Name), quotapolicy.TargetNamespace(ref, policy.Namespace))
 		var aiGatewayRoutes aigv1b1.AIGatewayRouteList
 		if err := c.client.List(ctx, &aiGatewayRoutes,
 			client.MatchingFields{k8sClientIndexBackendToReferencingAIGatewayRoute: key}); err != nil {

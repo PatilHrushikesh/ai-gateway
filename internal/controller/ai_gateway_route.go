@@ -34,6 +34,7 @@ import (
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
 	"github.com/envoyproxy/ai-gateway/internal/internalapi"
 	aigwjson "github.com/envoyproxy/ai-gateway/internal/json"
+	"github.com/envoyproxy/ai-gateway/internal/quotapolicy"
 )
 
 const (
@@ -519,6 +520,7 @@ func (c *AIGatewayRouteController) fetchEffectiveQuotaPoliciesForRoute(
 	route *aigv1b1.AIGatewayRoute,
 ) ([]*aigv1a1.QuotaPolicy, error) {
 	seenPolicies := make(map[string]*aigv1a1.QuotaPolicy)
+	processedPolicies := make(map[string]struct{})
 	seenBackendKeys := make(map[string]bool)
 	grantCache := make(map[string]bool)
 	for i := range route.Spec.Rules {
@@ -556,10 +558,15 @@ func (c *AIGatewayRouteController) fetchEffectiveQuotaPoliciesForRoute(
 				if !policy.DeletionTimestamp.IsZero() {
 					continue
 				}
+				policyKey := policy.Namespace + "/" + policy.Name
+				if _, processed := processedPolicies[policyKey]; processed {
+					continue
+				}
+				processedPolicies[policyKey] = struct{}{}
 				effective := policy.DeepCopy()
 				effective.Spec.TargetRefs = make([]gwapiv1a2.NamespacedPolicyTargetReference, 0, len(policy.Spec.TargetRefs))
 				for _, target := range policy.Spec.TargetRefs {
-					targetNamespace := quotaPolicyTargetNamespace(target, policy.Namespace)
+					targetNamespace := quotapolicy.TargetNamespace(target, policy.Namespace)
 					if (target.Group != "" && target.Group != aiServiceBackendGroup) ||
 						(target.Kind != "" && target.Kind != aiServiceBackendKind) {
 						continue
@@ -577,7 +584,7 @@ func (c *AIGatewayRouteController) fetchEffectiveQuotaPoliciesForRoute(
 					effective.Spec.TargetRefs = append(effective.Spec.TargetRefs, target)
 				}
 				if len(effective.Spec.TargetRefs) > 0 {
-					seenPolicies[policy.Namespace+"/"+policy.Name] = effective
+					seenPolicies[policyKey] = effective
 				}
 			}
 		}

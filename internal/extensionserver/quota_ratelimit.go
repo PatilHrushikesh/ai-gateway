@@ -35,6 +35,7 @@ import (
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
 	"github.com/envoyproxy/ai-gateway/internal/controller"
+	"github.com/envoyproxy/ai-gateway/internal/quotapolicy"
 	"github.com/envoyproxy/ai-gateway/internal/ratelimit/translator"
 )
 
@@ -53,13 +54,6 @@ const (
 	// the computed quota cost for the current request.
 	quotaCostMetadataKey = "quota_cost"
 )
-
-func quotaPolicyTargetNamespace(ref gwapiv1a2.NamespacedPolicyTargetReference, policyNamespace string) string {
-	if ref.Namespace == nil || *ref.Namespace == "" {
-		return policyNamespace
-	}
-	return string(*ref.Namespace)
-}
 
 // maybeInjectQuotaRateLimiting injects the rate limit HTTP filter into the HCM
 // filter chain of listeners that serve AI Gateway routes with quota backends,
@@ -161,7 +155,7 @@ func (s *Server) authorizedQuotaPolicies(
 				(ref.Kind != "" && ref.Kind != controller.AIServiceBackendKind) {
 				continue
 			}
-			targetNamespace := quotaPolicyTargetNamespace(ref, policy.Namespace)
+			targetNamespace := quotapolicy.TargetNamespace(ref, policy.Namespace)
 			if err := controller.ValidateQuotaPolicyAIServiceBackendReference(
 				ctx, s.k8sClient, policy.Namespace, targetNamespace, string(ref.Name)); err != nil {
 				continue
@@ -186,7 +180,7 @@ func buildQuotaBackendPolicies(policies []aigv1a1.QuotaPolicy) map[string][]aigv
 	for i := range policies {
 		policy := &policies[i]
 		for _, ref := range policy.Spec.TargetRefs {
-			key := quotaPolicyTargetNamespace(ref, policy.Namespace) + "/" + string(ref.Name)
+			key := quotapolicy.TargetNamespace(ref, policy.Namespace) + "/" + string(ref.Name)
 			backends[key] = append(backends[key], *policy)
 		}
 	}
@@ -593,7 +587,7 @@ func enableQuotaRateLimitOnRoute(_ logr.Logger, route *routev3.Route, policies [
 			if modelInfo != nil {
 				matched := false
 				for _, target := range policy.Spec.TargetRefs {
-					targetName := quotaPolicyTargetNamespace(target, policy.Namespace) + "/" + string(target.Name)
+					targetName := quotapolicy.TargetNamespace(target, policy.Namespace) + "/" + string(target.Name)
 					if overrides, ok := modelInfo.backendModels[targetName]; ok {
 						for _, override := range overrides {
 							if override == modelName {
@@ -748,10 +742,10 @@ func buildSimpleModelEntries(modelName, policyNamespace string, targets []gwapiv
 
 	// Request-time entries only. Stream-done is added once per model in enableQuotaRateLimitOnRoute.
 	for _, target := range targets {
-		targetKey := quotaPolicyTargetNamespace(target, policyNamespace) + "/" + string(target.Name)
+		targetKey := quotapolicy.TargetNamespace(target, policyNamespace) + "/" + string(target.Name)
 		resolvedModel := resolveModelName(targetKey, modelName, routeModelNames)
 		entries = append(entries, &routev3.RateLimit{
-			Actions: requestTimeBaseActions(quotaPolicyTargetNamespace(target, policyNamespace), string(target.Name), resolvedModel),
+			Actions: requestTimeBaseActions(quotapolicy.TargetNamespace(target, policyNamespace), string(target.Name), resolvedModel),
 		})
 	}
 
@@ -778,8 +772,8 @@ func buildBucketRuleLimitEntries(modelName, policyNamespace string, quota *aigv1
 	var entries []*routev3.RateLimit
 
 	for _, target := range targets {
-		targetKey := quotaPolicyTargetNamespace(target, policyNamespace) + "/" + string(target.Name)
-		targetNamespace := quotaPolicyTargetNamespace(target, policyNamespace)
+		targetKey := quotapolicy.TargetNamespace(target, policyNamespace) + "/" + string(target.Name)
+		targetNamespace := quotapolicy.TargetNamespace(target, policyNamespace)
 		resolvedModel := resolveModelName(targetKey, modelName, routeModelNames)
 
 		for rIdx, rule := range quota.BucketRules {

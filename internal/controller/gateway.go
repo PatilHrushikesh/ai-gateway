@@ -40,6 +40,7 @@ import (
 	"github.com/envoyproxy/ai-gateway/internal/filterapi"
 	"github.com/envoyproxy/ai-gateway/internal/internalapi"
 	"github.com/envoyproxy/ai-gateway/internal/llmcostcel"
+	"github.com/envoyproxy/ai-gateway/internal/quotapolicy"
 	"github.com/envoyproxy/ai-gateway/internal/version"
 )
 
@@ -1060,12 +1061,6 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 	injectedQuotaCosts map[string]struct{},
 	routeName string,
 ) {
-	var quotaPolicies aigv1a1.QuotaPolicyList
-	if err := c.client.List(ctx, &quotaPolicies); err != nil {
-		c.logger.Error(err, "failed to list QuotaPolicies for cost expression injection")
-		return
-	}
-
 	// Collect backend names and model name overrides on this route.
 	routeBackends := make(map[string]bool)
 	routeModels := make(map[string]bool)
@@ -1079,6 +1074,57 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 		}
 	}
 
+	// Look up only policies targeting backends on this route. The index key is
+	// backend-name.namespace, while ec.Backends uses namespace/backend-name.
+	seenPolicies := make(map[string]struct{})
+	var quotaPolicies aigv1a1.QuotaPolicyList
+	var fallbackPolicies *aigv1a1.QuotaPolicyList
+	for backendKey := range routeBackends {
+		backendNamespace, backendName, ok := strings.Cut(backendKey, "/")
+		if !ok || backendNamespace == "" || backendName == "" {
+			continue
+		}
+		indexKey := backendName + "." + backendNamespace
+
+		var matches aigv1a1.QuotaPolicyList
+		err := c.client.List(ctx, &matches, client.MatchingFields{
+			k8sClientIndexAIServiceBackendToTargetingQuotaPolicy: indexKey,
+		})
+		if err != nil {
+			if !strings.Contains(err.Error(), "field label not supported") {
+				c.logger.Error(err, "failed to list QuotaPolicies for cost expression injection",
+					"backend", backendKey)
+				return
+			}
+
+			// Keep a fallback for clients without field-index support, such as
+			// lightweight test clients.
+			if fallbackPolicies == nil {
+				fallbackPolicies = &aigv1a1.QuotaPolicyList{}
+				if fallbackErr := c.client.List(ctx, fallbackPolicies); fallbackErr != nil {
+					c.logger.Error(fallbackErr, "failed to list QuotaPolicies for cost expression injection")
+					return
+				}
+			}
+			for i := range fallbackPolicies.Items {
+				policy := &fallbackPolicies.Items[i]
+				if slices.Contains(quotaPolicyTargetRefsIndexFunc(policy), indexKey) {
+					matches.Items = append(matches.Items, *policy)
+				}
+			}
+		}
+
+		for i := range matches.Items {
+			policy := &matches.Items[i]
+			policyKey := policy.Namespace + "/" + policy.Name
+			if _, exists := seenPolicies[policyKey]; exists {
+				continue
+			}
+			seenPolicies[policyKey] = struct{}{}
+			quotaPolicies.Items = append(quotaPolicies.Items, *policy)
+		}
+	}
+
 	for i := range quotaPolicies.Items {
 		qp := &quotaPolicies.Items[i]
 		// Check if this policy targets any backend on this route.
@@ -1089,7 +1135,7 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 				(ref.Kind != "" && ref.Kind != aiServiceBackendKind) {
 				continue
 			}
-			targetNamespace := quotaPolicyTargetNamespace(ref, qp.Namespace)
+			targetNamespace := quotapolicy.TargetNamespace(ref, qp.Namespace)
 			if err := c.referenceGrantValidator.validateQuotaPolicyAIServiceBackendReference(
 				ctx, qp.Namespace, targetNamespace, string(ref.Name)); err != nil {
 				continue
@@ -1124,7 +1170,7 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 			// ext_proc only evaluates the entry matching the serving backend and model,
 			// storing the result under the shared metadata key.
 			for _, ref := range authorizedTargets {
-				backendKey := quotaPolicyTargetNamespace(ref, qp.Namespace) + "/" + string(ref.Name)
+				backendKey := quotapolicy.TargetNamespace(ref, qp.Namespace) + "/" + string(ref.Name)
 				dedupeKey := QuotaCostMetadataKey + "\x00" + *pmq.ModelName + "\x00" + backendKey
 				if _, exists := injectedQuotaCosts[dedupeKey]; exists {
 					continue
