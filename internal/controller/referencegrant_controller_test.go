@@ -1095,3 +1095,77 @@ func TestReferenceGrantController_AffectedQuotaPolicies(t *testing.T) {
 	require.Len(t, affected, 1)
 	require.Equal(t, "remote", affected[0].Name)
 }
+
+func TestReferenceGrantController_Reconcile_QuotaPolicyReferenceGrantChanges(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, gwapiv1b1.Install(scheme))
+	require.NoError(t, aigv1a1.AddToScheme(scheme))
+	require.NoError(t, aigv1b1.AddToScheme(scheme))
+
+	remotePolicy := &aigv1a1.QuotaPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "remote", Namespace: "platform"},
+		Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []gwapiv1a2.NamespacedPolicyTargetReference{{
+			Group:     aiServiceBackendGroup,
+			Kind:      aiServiceBackendKind,
+			Name:      "provider",
+			Namespace: ptr.To(gwapiv1a2.Namespace("providers")),
+		}}},
+	}
+	localPolicy := &aigv1a1.QuotaPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "local", Namespace: "providers"},
+		Spec: aigv1a1.QuotaPolicySpec{TargetRefs: []gwapiv1a2.NamespacedPolicyTargetReference{{
+			Group: aiServiceBackendGroup,
+			Kind:  aiServiceBackendKind,
+			Name:  "provider",
+		}}},
+	}
+	referenceGrant := &gwapiv1b1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Name: "provider-grant", Namespace: "providers"},
+		Spec: gwapiv1b1.ReferenceGrantSpec{
+			From: []gwapiv1b1.ReferenceGrantFrom{{
+				Group:     "aigateway.envoyproxy.io",
+				Kind:      "QuotaPolicy",
+				Namespace: "platform",
+			}},
+			To: []gwapiv1b1.ReferenceGrantTo{{
+				Group: aiServiceBackendGroup,
+				Kind:  aiServiceBackendKind,
+				Name:  ptr.To(gwapiv1b1.ObjectName("provider")),
+			}},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(remotePolicy, localPolicy, referenceGrant).
+		WithIndex(&aigv1a1.QuotaPolicy{}, k8sClientIndexQuotaPolicyTargetNamespace, quotaPolicyTargetNamespaceIndexFunc).
+		Build()
+	quotaPolicyChan := make(chan event.GenericEvent, 10)
+	controller := NewReferenceGrantController(
+		fakeClient,
+		logr.Discard(),
+		make(chan event.GenericEvent, 10),
+		make(chan event.GenericEvent, 10),
+		quotaPolicyChan,
+	)
+	request := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(referenceGrant)}
+
+	// A grant creation must enqueue the cross-namespace QuotaPolicy, but not
+	// the same-namespace policy that does not require a grant.
+	_, err := controller.Reconcile(t.Context(), request)
+	require.NoError(t, err)
+	require.Len(t, quotaPolicyChan, 1)
+	eventObject := (<-quotaPolicyChan).Object.(*aigv1a1.QuotaPolicy)
+	require.Equal(t, "platform/remote", eventObject.Namespace+"/"+eventObject.Name)
+
+	// A grant deletion must enqueue the previously authorized policy again so
+	// its stale cross-namespace configuration can be removed.
+	var currentGrant gwapiv1b1.ReferenceGrant
+	require.NoError(t, fakeClient.Get(t.Context(), client.ObjectKeyFromObject(referenceGrant), &currentGrant))
+	require.NoError(t, fakeClient.Delete(t.Context(), &currentGrant))
+	_, err = controller.Reconcile(t.Context(), request)
+	require.NoError(t, err)
+	require.Len(t, quotaPolicyChan, 1)
+	eventObject = (<-quotaPolicyChan).Object.(*aigv1a1.QuotaPolicy)
+	require.Equal(t, "platform/remote", eventObject.Namespace+"/"+eventObject.Name)
+}
