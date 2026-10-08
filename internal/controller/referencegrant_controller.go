@@ -41,12 +41,8 @@ func NewReferenceGrantController(
 	logger logr.Logger,
 	aiGatewayRouteChan chan event.GenericEvent,
 	backendSecurityPolicyChan chan event.GenericEvent,
-	quotaPolicyChans ...chan event.GenericEvent,
+	quotaPolicyChan chan event.GenericEvent,
 ) *ReferenceGrantController {
-	var quotaPolicyChan chan event.GenericEvent
-	if len(quotaPolicyChans) > 0 {
-		quotaPolicyChan = quotaPolicyChans[0]
-	}
 	return &ReferenceGrantController{
 		client:                    c,
 		logger:                    logger,
@@ -86,7 +82,7 @@ func (c *ReferenceGrantController) Reconcile(ctx context.Context, req reconcile.
 	return ctrl.Result{}, nil
 }
 
-// triggerAffectedReconciles triggers reconciliation of every AIGatewayRoute and BackendSecurityPolicy and QuotaPolicy
+// triggerAffectedReconciles triggers reconciliation of every AIGatewayRoute, BackendSecurityPolicy and QuotaPolicy
 // that a ReferenceGrant in grantNamespace may affect, whether it was just created, updated, or is about to be deleted.
 //
 // The set of affected resources is derived from the grant's namespace rather than its current spec: when a grant is narrowed
