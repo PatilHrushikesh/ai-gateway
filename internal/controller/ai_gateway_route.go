@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -539,19 +538,7 @@ func (c *AIGatewayRouteController) fetchEffectiveQuotaPoliciesForRoute(
 			var policies aigv1a1.QuotaPolicyList
 			if err := c.client.List(ctx, &policies,
 				client.MatchingFields{k8sClientIndexAIServiceBackendToTargetingQuotaPolicy: key}); err != nil {
-				if !strings.Contains(err.Error(), "field label not supported") {
-					return nil, fmt.Errorf("failed to list QuotaPolicies for backend %s: %w", key, err)
-				}
-				var allPolicies aigv1a1.QuotaPolicyList
-				if fallbackErr := c.client.List(ctx, &allPolicies); fallbackErr != nil {
-					return nil, fmt.Errorf("failed to list QuotaPolicies for backend %s: %w", key, fallbackErr)
-				}
-				for i := range allPolicies.Items {
-					policy := &allPolicies.Items[i]
-					if slices.Contains(quotaPolicyTargetRefsIndexFunc(policy), key) {
-						policies.Items = append(policies.Items, *policy)
-					}
-				}
+				return nil, fmt.Errorf("failed to list QuotaPolicies for backend %s: %w", key, err)
 			}
 			for k := range policies.Items {
 				policy := &policies.Items[k]

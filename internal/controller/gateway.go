@@ -1078,7 +1078,6 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 	// backend-name.namespace, while ec.Backends uses namespace/backend-name.
 	seenPolicies := make(map[string]struct{})
 	var quotaPolicies aigv1a1.QuotaPolicyList
-	var fallbackPolicies *aigv1a1.QuotaPolicyList
 	for backendKey := range routeBackends {
 		backendNamespace, backendName, ok := strings.Cut(backendKey, "/")
 		if !ok || backendNamespace == "" || backendName == "" {
@@ -1091,27 +1090,9 @@ func (c *GatewayController) injectQuotaPolicyCostExpressions(
 			k8sClientIndexAIServiceBackendToTargetingQuotaPolicy: indexKey,
 		})
 		if err != nil {
-			if !strings.Contains(err.Error(), "field label not supported") {
-				c.logger.Error(err, "failed to list QuotaPolicies for cost expression injection",
-					"backend", backendKey)
-				return
-			}
-
-			// Keep a fallback for clients without field-index support, such as
-			// lightweight test clients.
-			if fallbackPolicies == nil {
-				fallbackPolicies = &aigv1a1.QuotaPolicyList{}
-				if fallbackErr := c.client.List(ctx, fallbackPolicies); fallbackErr != nil {
-					c.logger.Error(fallbackErr, "failed to list QuotaPolicies for cost expression injection")
-					return
-				}
-			}
-			for i := range fallbackPolicies.Items {
-				policy := &fallbackPolicies.Items[i]
-				if slices.Contains(quotaPolicyTargetRefsIndexFunc(policy), indexKey) {
-					matches.Items = append(matches.Items, *policy)
-				}
-			}
+			c.logger.Error(err, "failed to list QuotaPolicies for cost expression injection",
+				"backend", backendKey)
+			return
 		}
 
 		for i := range matches.Items {
