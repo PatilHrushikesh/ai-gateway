@@ -351,6 +351,50 @@ curl -H "Content-Type: application/json" \
   $GATEWAY_URL/v1/responses
 ```
 
+### Decisions
+
+**Endpoint:** `POST /v1/decisions`
+
+**Status:** ✅ Supported for OpenAI backends (beta)
+
+**Description:** Evaluate shared text or image evidence against typed questions and return probabilities, fixed choices, or rubric scores. The request and response use the native OpenAI Decisions API format. OpenAI offers this API as a beta, so its request and response formats may change.
+
+**Features:**
+
+- ✅ `predicate`, `choice`, and `score` questions, including multiple independent questions in one request
+- ✅ `refusal` answers when the model declines an individual question
+- ✅ Text input and user messages containing text and inline base64 images
+- ✅ Model selection via request body or `x-ai-eg-model` header
+- ✅ Model name virtualization, provider fallback, and load balancing
+- ✅ Token usage and model metadata from the upstream response
+- ❌ Streaming (not documented by the OpenAI Decisions API)
+- ❌ Hosted image URLs and file IDs (not supported by the OpenAI Decisions API)
+
+**Supported Providers:**
+
+- OpenAI
+
+**Example:**
+
+```bash
+curl -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-6-luna",
+    "input": "I was charged twice for my order.",
+    "questions": [{
+      "type": "choice",
+      "name": "department",
+      "instructions": "Which department should handle this complaint?",
+      "choices": [
+        {"value": "billing", "description": "Payments, invoices, and refunds."},
+        {"value": "technical", "description": "Problems using the product."},
+        {"value": "other", "description": "Requests outside these categories."}
+      ]
+    }]
+  }' \
+  $GATEWAY_URL/v1/decisions
+```
+
 ### Responses Input Tokens
 
 **Endpoint:** `POST /v1/responses/input_tokens`
