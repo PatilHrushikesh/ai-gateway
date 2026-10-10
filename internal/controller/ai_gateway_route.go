@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	stdjson "encoding/json" //nolint: depguard // byte-stable hashing; sonic does not guarantee stable field order.
 	"errors"
 	"fmt"
 	"sort"
@@ -32,7 +33,6 @@ import (
 	aigv1a1 "github.com/envoyproxy/ai-gateway/api/v1alpha1"
 	aigv1b1 "github.com/envoyproxy/ai-gateway/api/v1beta1"
 	"github.com/envoyproxy/ai-gateway/internal/internalapi"
-	aigwjson "github.com/envoyproxy/ai-gateway/internal/json"
 	"github.com/envoyproxy/ai-gateway/internal/quotapolicy"
 )
 
@@ -49,9 +49,16 @@ const (
 	// @see https://gateway.envoyproxy.io/contributions/design/metadata/
 	httpRouteBackendRefPriorityAnnotationKey           = egAnnotationPrefix + "backend-ref-priority"
 	httpRouteAnnotationForAIGatewayGeneratedIndication = egAnnotationPrefix + internalapi.AIGatewayGeneratedHTTPRouteAnnotation
-	httpRouteQuotaPolicyHashAnnotationKey              = "aigateway.envoyproxy.io/quota-policy-hash"
-	egOwningGatewayNameLabel                           = egAnnotationPrefix + "owning-gateway-name"
-	egOwningGatewayNamespaceLabel                      = egAnnotationPrefix + "owning-gateway-namespace"
+	// httpRouteQuotaPolicyHashAnnotationKey carries a hash of the QuotaPolicies attached to the
+	// AIServiceBackends referenced by this route. QuotaPolicy is an AI Gateway CRD that Envoy Gateway
+	// does not watch, so a QuotaPolicy change would otherwise regenerate a byte-identical HTTPRoute
+	// (a no-op update) and never force Envoy Gateway to re-translate. Stamping the hash makes the
+	// HTTPRoute genuinely change on a QuotaPolicy update, which triggers Envoy Gateway to re-translate
+	// and re-run the extension server's PostTranslateModify hook (which injects the quota rate limit
+	// filter, cluster, and per-route descriptors). Mirrors stampGatewayConfigHash in gateway.go.
+	httpRouteQuotaPolicyHashAnnotationKey = egAnnotationPrefix + "quota-policy-hash"
+	egOwningGatewayNameLabel              = egAnnotationPrefix + "owning-gateway-name"
+	egOwningGatewayNamespaceLabel         = egAnnotationPrefix + "owning-gateway-namespace"
 	// apiKeyInSecret is the key to store OpenAI API key.
 	apiKeyInSecret = "apiKey"
 	// GatewayConfigAnnotationKey is the annotation key used on Gateway objects to reference a GatewayConfig.
@@ -390,6 +397,9 @@ func (c *AIGatewayRouteController) newHTTPRoute(ctx context.Context, dst *gwapiv
 	// HACK: We need to set an annotation so that Envoy Gateway reconciles the HTTPRoute when the backend refs change.
 	dst.Annotations[httpRouteBackendRefPriorityAnnotationKey] = buildPriorityAnnotation(aiGatewayRoute.Spec.Rules)
 	dst.Annotations[httpRouteAnnotationForAIGatewayGeneratedIndication] = "true"
+	// HACK: Stamp a hash of the QuotaPolicies affecting this route's backends so that a QuotaPolicy
+	// change (which Envoy Gateway does not watch) actually mutates the HTTPRoute, forcing Envoy Gateway
+	// to re-translate and re-run PostTranslateModify. See httpRouteQuotaPolicyHashAnnotationKey.
 	quotaHash, err := c.computeQuotaPolicyHash(ctx, aiGatewayRoute)
 	if err != nil {
 		return fmt.Errorf("failed to compute QuotaPolicy hash: %w", err)
@@ -529,7 +539,7 @@ func (c *AIGatewayRouteController) fetchEffectiveQuotaPoliciesForRoute(
 				continue
 			}
 			backendNamespace := ref.GetNamespace(route.Namespace)
-			key := fmt.Sprintf("%s.%s", ref.Name, backendNamespace)
+			key := namespacedNameIndexKey(string(ref.Name), backendNamespace)
 			if seenBackendKeys[key] {
 				continue
 			}
@@ -605,9 +615,9 @@ func hashQuotaPolicies(policies []*aigv1a1.QuotaPolicy) (string, error) {
 	for _, policy := range ordered {
 		hashed = append(hashed, hashedPolicy{Namespace: policy.Namespace, Name: policy.Name, Spec: policy.Spec})
 	}
-	data, err := aigwjson.Marshal(hashed)
+	data, err := stdjson.Marshal(hashed)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal QuotaPolicies for hashing: %w", err)
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:4]), nil

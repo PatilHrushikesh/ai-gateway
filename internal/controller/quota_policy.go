@@ -73,12 +73,21 @@ func (c *QuotaPolicyController) Reconcile(ctx context.Context, req reconcile.Req
 			if err = c.deleteQuotaPolicyConfig(ctx, req.NamespacedName); err != nil {
 				return ctrl.Result{}, err
 			}
-			c.notifyQuotaPolicyRoutesOnDeletion(ctx, req.NamespacedName)
-			return ctrl.Result{}, nil
+			// Spec.TargetRefs are no longer available, so notify every AIGatewayRoute that references
+			// a backend in this namespace (wherever the route lives) instead.
+			if c.notifyQuotaPolicyRoutesOnDeletion(ctx, req.NamespacedName) {
+				return ctrl.Result{}, nil
+			}
+			return ctrl.Result{}, c.notifyAIGatewayRoutesForNamespace(ctx, req.Namespace)
 		}
 		return ctrl.Result{}, err
 	}
+	c.logger.Info("Reconciling QuotaPolicy", "namespace", req.Namespace, "name", req.Name)
+
 	if handleFinalizer(ctx, c.client, c.logger, &quotaPolicy, func(ctx context.Context, policy *aigv1a1.QuotaPolicy) error {
+		// Notify the AIGatewayRoutes targeting this policy's backends so their derived HTTPRoutes are
+		// re-reconciled (re-stamping the quota-policy-hash annotation) and Envoy Gateway re-translates
+		// without the deleted policy.
 		c.notifyAIGatewayRoutes(ctx, policy)
 		return c.deleteQuotaPolicyConfig(ctx, req.NamespacedName)
 	}) {
@@ -102,7 +111,6 @@ func (c *QuotaPolicyController) Reconcile(ctx context.Context, req reconcile.Req
 	} else {
 		c.updateQuotaPolicyStatus(ctx, &quotaPolicy, aigv1a1.ConditionTypeAccepted, "ReconciliationSucceeded", "QuotaPolicy reconciled successfully")
 	}
-
 	c.notifyAIGatewayRoutes(ctx, &quotaPolicy)
 	c.notifyQuotaPolicyRoutesForKeys(ctx, previousTargetKeys)
 	if needsRouteRecovery {
@@ -223,18 +231,18 @@ func (c *QuotaPolicyController) deleteQuotaPolicyConfig(ctx context.Context, key
 
 // notifyQuotaPolicyRoutesOnDeletion uses the last successfully reconciled
 // backend identities so deletion also reaches routes in other namespaces.
-func (c *QuotaPolicyController) notifyQuotaPolicyRoutesOnDeletion(ctx context.Context, key client.ObjectKey) {
+func (c *QuotaPolicyController) notifyQuotaPolicyRoutesOnDeletion(ctx context.Context, key client.ObjectKey) bool {
 	cacheKey := fmt.Sprintf("%s/%s", key.Namespace, key.Name)
 	c.mu.RLock()
 	targetKeys := append([]string(nil), c.policyBackendKeys[cacheKey]...)
 	c.mu.RUnlock()
-	c.notifyQuotaPolicyRoutesForKeys(ctx, targetKeys)
-	if len(targetKeys) == 0 {
-		c.notifyAllAIGatewayRoutes(ctx)
+	if len(targetKeys) > 0 {
+		c.notifyQuotaPolicyRoutesForKeys(ctx, targetKeys)
 	}
 	c.mu.Lock()
 	delete(c.policyBackendKeys, cacheKey)
 	c.mu.Unlock()
+	return len(targetKeys) > 0
 }
 
 func (c *QuotaPolicyController) notifyQuotaPolicyRoutesForKeys(ctx context.Context, targetKeys []string) {
@@ -301,7 +309,7 @@ func (c *QuotaPolicyController) getMergedConfigsLocked() []*rlsconfv3.RateLimitC
 // when an AIServiceBackend changes, all QuotaPolicies targeting it are re-reconciled.
 func (c *QuotaPolicyController) BackendToQuotaPolicy(ctx context.Context, obj client.Object) []reconcile.Request {
 	var quotaPolicies aigv1a1.QuotaPolicyList
-	key := fmt.Sprintf("%s.%s", obj.GetName(), obj.GetNamespace())
+	key := namespacedNameIndexKey(obj.GetName(), obj.GetNamespace())
 	if err := c.client.List(ctx, &quotaPolicies,
 		client.MatchingFields{k8sClientIndexAIServiceBackendToTargetingQuotaPolicy: key}); err != nil {
 		c.logger.Error(err, "failed to list QuotaPolicies for backend", "backend", key)
@@ -324,7 +332,7 @@ func (c *QuotaPolicyController) BackendToQuotaPolicy(ctx context.Context, obj cl
 // to re-translate xDS and call PostTranslateModify with the updated QuotaPolicy.
 func (c *QuotaPolicyController) notifyAIGatewayRoutes(ctx context.Context, policy *aigv1a1.QuotaPolicy) {
 	for _, ref := range policy.Spec.TargetRefs {
-		key := fmt.Sprintf("%s.%s", string(ref.Name), quotapolicy.TargetNamespace(ref, policy.Namespace))
+		key := namespacedNameIndexKey(string(ref.Name), quotapolicy.TargetNamespace(ref, policy.Namespace))
 		var aiGatewayRoutes aigv1b1.AIGatewayRouteList
 		if err := c.client.List(ctx, &aiGatewayRoutes,
 			client.MatchingFields{k8sClientIndexBackendToReferencingAIGatewayRoute: key}); err != nil {
@@ -336,6 +344,39 @@ func (c *QuotaPolicyController) notifyAIGatewayRoutes(ctx context.Context, polic
 			c.aiGatewayRouteChan <- event.GenericEvent{Object: route}
 		}
 	}
+}
+
+// notifyAIGatewayRoutesForNamespace sends one event for each AIGatewayRoute that references an
+// AIServiceBackend in the given namespace, wherever the route lives. It is used on the QuotaPolicy
+// deletion (not-found) path, where Spec.TargetRefs are no longer available.
+func (c *QuotaPolicyController) notifyAIGatewayRoutesForNamespace(ctx context.Context, namespace string) error {
+	var backends aigv1b1.AIServiceBackendList
+	if err := c.client.List(ctx, &backends, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("failed to list AIServiceBackends in namespace %s: %w", namespace, err)
+	}
+	notified := make(map[client.ObjectKey]struct{})
+	for i := range backends.Items {
+		key := namespacedNameIndexKey(backends.Items[i].Name, namespace)
+		var aiGatewayRoutes aigv1b1.AIGatewayRouteList
+		if err := c.client.List(ctx, &aiGatewayRoutes,
+			client.MatchingFields{k8sClientIndexBackendToReferencingAIGatewayRoute: key}); err != nil {
+			return fmt.Errorf("failed to list AIGatewayRoutes for backend %s: %w", key, err)
+		}
+		for j := range aiGatewayRoutes.Items {
+			route := &aiGatewayRoutes.Items[j]
+			// A route referencing several backends in this namespace is found once per backend;
+			// notify it only once.
+			routeKey := client.ObjectKeyFromObject(route)
+			if _, ok := notified[routeKey]; ok {
+				continue
+			}
+			notified[routeKey] = struct{}{}
+			c.logger.Info("notifying AIGatewayRoute of QuotaPolicy deletion",
+				"route", route.Name, "namespace", route.Namespace)
+			c.aiGatewayRouteChan <- event.GenericEvent{Object: route}
+		}
+	}
+	return nil
 }
 
 // updateQuotaPolicyStatus updates the status of the QuotaPolicy.
