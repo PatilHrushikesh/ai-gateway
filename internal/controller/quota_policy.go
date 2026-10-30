@@ -108,10 +108,8 @@ func (c *QuotaPolicyController) Reconcile(ctx context.Context, req reconcile.Req
 		// without the deleted policy.
 		c.notifyAIGatewayRoutes(ctx, policy)
 		return c.deleteQuotaPolicyConfig(ctx, req.NamespacedName)
-	}); err != nil {
+	}); onDelete || err != nil {
 		return ctrl.Result{}, err
-	} else if onDelete {
-		return ctrl.Result{}, nil
 	}
 
 	cacheKey := NamespacedNameKey(quotaPolicy.Namespace, quotaPolicy.Name)
